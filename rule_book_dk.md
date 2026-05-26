@@ -143,19 +143,19 @@ Bonka 3S LiPo (11.1V)
 
 #### Board 1 — `0x40` (Right Side, no solder pad change)
 
-| Leg | Name | Coxa | Femur | Tibia |
-|-----|------|------|-------|-------|
-| 0 | Front Right | ch 0 | ch 1 | ch 2 |
-| 1 | Mid Right | ch 3 | ch 4 | ch 5 |
-| 2 | Rear Right | ch 6 | ch 7 | ch 8 |
+| Leg | Name | High (Coxa) | Mid (Femur) | Down (Tibia) |
+|-----|------|-------------|-------------|--------------|
+| 1 | Front Right | L1 (ch 0) | M1 (ch 1) | D1 (ch 2) |
+| 2 | Mid Right | L2 (ch 3) | M2 (ch 4) | D2 (ch 5) |
+| 3 | Rear Right | L3 (ch 6) | M3 (ch 7) | D3 (ch 8) |
 
 #### Board 2 — `0x41` (Left Side, bridge A0 solder pad)
 
-| Leg | Name | Coxa | Femur | Tibia |
-|-----|------|------|-------|-------|
-| 3 | Front Left | ch 0 | ch 1 | ch 2 |
-| 4 | Mid Left | ch 3 | ch 4 | ch 5 |
-| 5 | Rear Left | ch 6 | ch 7 | ch 8 |
+| Leg | Name | High (Coxa) | Mid (Femur) | Down (Tibia) |
+|-----|------|-------------|-------------|--------------|
+| 4 | Front Left | L4 (ch 0) | M4 (ch 1) | D4 (ch 2) |
+| 5 | Mid Left | L5 (ch 3) | M5 (ch 4) | D5 (ch 5) |
+| 6 | Rear Left | L6 (ch 6) | M6 (ch 7) | D6 (ch 8) |
 
 ### Current Test Setup (3 Servos Only)
 
@@ -166,9 +166,9 @@ ESP32 3V3       ─── PCA9685 (0x40) VCC
 ESP32 GND       ─── PCA9685 (0x40) GND
 ZX-052 6V OUT   ─── PCA9685 (0x40) V+
 
-PCA9685 Channel 0 ─── 360° Servo (Coxa)
-PCA9685 Channel 1 ─── 360° Servo (Femur)
-PCA9685 Channel 2 ─── 360° Servo (Tibia)
+PCA9685 Channel 0 ─── 360° Servo (High - L1)
+PCA9685 Channel 1 ─── 360° Servo (Mid - M1)
+PCA9685 Channel 2 ─── 360° Servo (Down - D1)
 ```
 
 ---
