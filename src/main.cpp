@@ -16,8 +16,8 @@
 // ---------------------------------------------------------------------------
 // Wi-Fi Access Point Credentials
 // ---------------------------------------------------------------------------
-const char *ssid = "dk";
-const char *password = "dakshan11"; // Must be at least 8 characters
+const char *ssid = "DK 4412";
+const char *password = "197M97a>"; // Must be at least 8 characters
 
 WebServer server(80);
 
