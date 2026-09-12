@@ -2,8 +2,8 @@
 
 > **Project Owner:** Dakshan  
 > **Start Date:** April 2026  
-> **Last Updated:** 2026-09-12 20:20 IST  
-> **Previous Updates:** 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
+> **Last Updated:** 2026-09-12 23:33 IST  
+> **Previous Updates:** 2026-09-12 20:20 IST | 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
 > **Phase 2 Status:** Finished on 2026-09-04 — Single-Leg Subassembly Testing Verified (L=Ch0, M=Ch1, D=Ch2 fully coordinated & dancing)
 > **Current Status:** Phase 3 — Full 18-servo dual-PCA9685 controller (0x40 Right, 0x43 Left) with direction inversion (INV), trim calibration, gait choreography, and live SWAP command.
 
@@ -469,6 +469,7 @@ All information provided by the project owner, timestamped for reference.
 | 2026-09-12 20:08 IST | Dual-Board Bus Drop Troubleshooting | User reported that each board responds individually (0x40 and 0x43), but when connecting both, only one responds (or vice-versa). Diagnosed header pinout traps (OE pin offset between GND and SCL), star-wiring method, and shared ground requirements. |
 | 2026-09-12 20:09 IST | Daisy-Chain Pass-Through Diagnosis | Identified that whichever board is connected directly to the ESP32 is detected (0x40 or 0x43), while the daisy-chained second board is unpowered due to the OE pin offset on the 6-pin header. Instructed user to connect both boards directly to the ESP32 in parallel. |
 | 2026-09-12 20:20 IST | Both PCA9685 Boards Simultaneously Online | User verified both boards detected simultaneously: Board 1 at 0x40 (Right: Legs 1-3) and Board 2 at 0x43 (Left: Legs 4-6). Also detected Sub-Call addresses (0x71, 0x72, 0x74) and All-Call (0x70). Dual-PCA9685 hardware I2C bus successfully verified. |
+| 2026-09-12 23:33 IST | Pushed to GitHub Repository | Committed and pushed changes to origin/main (commit 446deac): dual-PCA9685 controller (0x40 Right, 0x43 Left), direct PWM ticks, updated rule book, and Android bluetooth gamepad controller app. Working tree clean. |
 
 ---
 
