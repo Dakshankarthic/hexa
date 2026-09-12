@@ -1,413 +1,875 @@
 // =============================================================================
-// ESP32 Hexapod - Full 18-Servo Firmware with Wi-Fi Web Control
-// PlatformIO | Framework: Arduino | Board: ESP32 DevKit
+// ESP32 Hexapod — Full 18-Servo Dual-PCA9685 Controller
+// PlatformIO | Framework: Arduino | Board: ESP32 DevKit (30-pin)
 //
-// Hardware: ESP32 30-pin + 2x PCA9685 + 18x MG996R (180° servos)
-// Board 1 (0x40): Right legs (0, 1, 2) | Board 2 (0x41): Left legs (3, 4, 5)
+// Hardware Wiring (both PCA9685 boards daisy-chained on same I²C bus):
+//   ESP32 SDA (GPIO 21) ─── PCA9685 SDA (both boards)
+//   ESP32 SCL (GPIO 22) ─── PCA9685 SCL (both boards)
+//   ESP32 3V3           ─── PCA9685 VCC (Logic power, both boards)
+//   ESP32 GND           ─── PCA9685 GND (Common ground)
+//   ZX-052 6V OUT       ─── PCA9685 V+  (Servo power, both boards)
+//
+// Channel Map:
+//   Board 0x40 (Main): Leg1(D=ch0,M=ch1,L=ch2) Leg2(D=ch3,M=ch4,L=ch5) Leg3(D=ch6,M=ch7,L=ch8)
+//   Board 0x43 (Aux):  Leg6(D=ch0,M=ch1,L=ch2) Leg5(D=ch3,M=ch4,L=ch5) Leg4(D=ch6,M=ch7,L=ch8)
+//
+// Leg Layout (top view, front facing up):
+//                ▲ FRONT (Forward Gait)
+//          Leg 4 ╲       ╱ Leg 1 (Front Right)
+//                 ╲ ─── ╱
+//   (Mid Left) Leg 5 │   │ Leg 2 (Mid Right)
+//                 ╱ ─── ╲
+//          Leg 6 ╱       ╲ Leg 3 (Rear Right)
+//                ▼ REAR
+//
+// Joint Degrees of Freedom per Leg (Side View):
+//   Chassis ──[L: Coxa (Yaw)]──┬──[M: Femur (Pitch)]──┬──[D: Tibia (Pitch)]── Foot
+//                              │                      │
+//                    (Horizontal Swing)       (Vertical Lift)      (Ground Contact)
+//
+// Tripod Groups:
+//   Group A: Legs 1, 3, 5  |  Group B: Legs 2, 4, 6
 // =============================================================================
 
-#include <Adafruit_PWMServoDriver.h>
 #include <Arduino.h>
-#include <WebServer.h>
-#include <WiFi.h>
 #include <Wire.h>
-#include <math.h>
+#include <Adafruit_PWMServoDriver.h>
+#include "BluetoothSerial.h"
 
 // ---------------------------------------------------------------------------
-// Wi-Fi Access Point Credentials
+// Hardware Configuration
 // ---------------------------------------------------------------------------
-const char *ssid = "DK 4412";
-const char *password = "197M97a>"; // Must be at least 8 characters
-
-WebServer server(80);
-
-// ---------------------------------------------------------------------------
-// PCA9685 Board instances
-// ---------------------------------------------------------------------------
-Adafruit_PWMServoDriver boardRight =
-    Adafruit_PWMServoDriver(0x40);                                 // Right legs
-Adafruit_PWMServoDriver boardLeft = Adafruit_PWMServoDriver(0x41); // Left legs
-
-#define SERVO_FREQ 50          // Hz - standard for analog servos
-#define OSC_FREQUENCY 27000000 // PCA9685 oscillator
+#define I2C_SDA         21
+#define I2C_SCL         22
+#define SERVO_FREQ      50          // Standard 50 Hz for MG996R servos
+#define OSC_FREQ        27000000    // PCA9685 internal oscillator
+#define PULSE_MIN       500         // ~0°  pulse width (us)
+#define PULSE_MID       1500        // ~90° pulse width (us)
+#define PULSE_MAX       2500        // ~180° pulse width (us)
+#define PCA_MAIN_ADDR   0x40        // Board 0x40 (default) → Right Side (Legs 1, 2, 3)
+#define PCA_AUX_ADDR    0x43        // Board 0x43 (A0+A1)   → Left Side  (Legs 4, 5, 6)
+#define NUM_LEGS        6
+#define UPDATE_INTERVAL 20          // 20 ms = 50 Hz update rate
 
 // ---------------------------------------------------------------------------
-// Servo pulse limits (microseconds) for 180° servos (MG996R)
+// PCA9685 Driver Instances
 // ---------------------------------------------------------------------------
-#define PULSE_MIN 500  // ~0 degrees
-#define PULSE_MID 1500 // ~90 degrees (mechanical neutral)
-#define PULSE_MAX 2500 // ~180 degrees
+Adafruit_PWMServoDriver pcaMain(PCA_MAIN_ADDR);
+Adafruit_PWMServoDriver pcaAux(PCA_AUX_ADDR);
+bool boardMainOK = false;
+bool boardAuxOK  = false;
 
 // ---------------------------------------------------------------------------
-// Leg geometry (millimeters) - adjust to your 3D-printed dimensions
+// Bluetooth Serial
 // ---------------------------------------------------------------------------
-#define COXA_LEN 52.0f   // Shoulder pivot → femur pivot
-#define FEMUR_LEN 66.0f  // Femur pivot → tibia pivot
-#define TIBIA_LEN 130.0f // Tibia pivot → foot tip
+BluetoothSerial SerialBT;
+static const char* BT_NAME = "HEXA-SPIDER";
 
 // ---------------------------------------------------------------------------
-// Leg standing position (body-relative, mm)
+// Data Structures
 // ---------------------------------------------------------------------------
-#define STAND_X 100.0f  // Horizontal reach from body center
-#define STAND_Y 0.0f    // Forward/back offset at neutral
-#define STAND_Z -110.0f // Height (negative = downward)
-
-// ---------------------------------------------------------------------------
-// Gait parameters
-// ---------------------------------------------------------------------------
-#define STEP_HEIGHT 30.0f // mm the foot lifts during swing
-#define STEP_LENGTH 40.0f // mm of forward travel per step
-#define TURN_LENGTH 30.0f // mm of lateral travel for turning
-#define GAIT_SPEED 20     // ms delay for smooth movement
-
-// ---------------------------------------------------------------------------
-// Leg indexing & configuration
-// ---------------------------------------------------------------------------
-#define NUM_LEGS 6
-#define DOF 3 // Coxa, Femur, Tibia per leg
-
-struct LegConfig {
-  bool isLeft;      // Mirror coxa direction for left-side legs
-  float mountAngle; // Body-frame mount angle (degrees) for foot placement
+struct Joint {
+  Adafruit_PWMServoDriver* board;   // Pointer to pcaMain or pcaAux
+  uint8_t  ch;                      // PCA9685 channel (0–15)
+  float    target;                  // Desired angle before trim (degrees)
+  float    angle;                   // Actual commanded angle after trim+clamp
+  float    trim;                    // Software calibration trim (degrees)
+  float    minA;                    // Safe minimum angle
+  float    maxA;                    // Safe maximum angle
+  bool     inv;                     // Invert servo direction (180 - angle)
+  bool     active;                  // true if the board was detected
 };
 
-const LegConfig LEG_CFG[NUM_LEGS] = {
-    {false, 45.0f},  // 0: Front Right
-    {false, 0.0f},   // 1: Mid   Right
-    {false, -45.0f}, // 2: Rear  Right
-    {true, 135.0f},  // 3: Front Left
-    {true, 180.0f},  // 4: Mid   Left
-    {true, 225.0f},  // 5: Rear  Left
+struct Leg {
+  uint8_t     num;                  // Leg number 1–6
+  const char* name;                 // Human-readable name
+  bool        leftSide;             // true for legs 4, 5, 6
+  Joint       L;                    // Coxa  (hip lateral swing)
+  Joint       M;                    // Femur (mid thigh lift)
+  Joint       D;                    // Tibia (shin / foot)
 };
 
-// Tripod gait groups
-const int TRIPOD_A[3] = {0, 4, 2}; // FR, ML, RR
-const int TRIPOD_B[3] = {1, 3, 5}; // MR, FL, RL
+Leg legs[NUM_LEGS];
 
-// Robot State Machine
-enum RobotState { IDLE, WALK_FWD, WALK_BWD, TURN_LEFT, TURN_RIGHT };
-RobotState currentState = IDLE;
+// ---------------------------------------------------------------------------
+// Motion Modes
+// ---------------------------------------------------------------------------
+enum Mode { MODE_HOLD, MODE_WALK, MODE_DANCE, MODE_WAVE, MODE_SWEEP };
+Mode mode = MODE_HOLD;
+unsigned long lastTickMs = 0;
+
+// Walk tuning parameters
+uint32_t walkPeriod = 2000;         // Full gait cycle duration (ms)
+float    walkSwing  = 25.0f;        // Coxa swing range (degrees from center)
+float    walkLift   = 30.0f;        // Femur lift height (degrees)
+
+// Sweep state
+float sweepPos = 90.0f;
+float sweepDir = 1.0f;
+float sweepRate = 60.0f;            // degrees per second
+
+// ---------------------------------------------------------------------------
+// Forward Declarations
+// ---------------------------------------------------------------------------
+void initJoint(Joint& j, Adafruit_PWMServoDriver* board, uint8_t ch,
+               float minA, float maxA);
+void initLegs();
+void scanI2C();
+void initBoard(Adafruit_PWMServoDriver& pca, const char* label, bool detected);
+void writeJoint(Joint& j, float targetDeg);
+void setLeg(int idx, float lDeg, float mDeg, float dDeg);
+void centerAll();
+void standAll();
+void relaxAll();
+void updateMotion();
+void updateWalk(unsigned long now);
+void updateDance(unsigned long now);
+void updateWave(unsigned long now);
+void updateSweep(float dt);
+void processCmd(String cmd);
+void printHelp();
+void printStatus();
 
 // ===========================================================================
-// FORWARD DECLARATIONS
-// ===========================================================================
-void setPulse(uint8_t leg, uint8_t joint, uint16_t pulseMicros);
-void setAngle(uint8_t leg, uint8_t joint, float degrees);
-bool solveIK(uint8_t leg, float x, float y, float z, float &coxaDeg,
-             float &femurDeg, float &tibiaDeg);
-void moveLegTo(uint8_t leg, float x, float y, float z);
-void standUp();
-void sitDown();
-void tripodStep(float dx, float dy);
-void setupWiFi();
-void handleRoot();
-void handleCommand();
-
-// ===========================================================================
-// SETUP
+//  SETUP
 // ===========================================================================
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n\n=================================================");
-  Serial.println(" ESP32 Hexapod - Full 18-Servo Wi-Fi Firmware");
-  Serial.println("=================================================");
+  delay(800);
 
-  // Initialize I2C
-  Wire.begin(21, 22);
-  Wire.setClock(400000);
+  Serial.println(F("\n=========================================================="));
+  Serial.println(F("  ESP32 Hexapod  |  18-Servo Dual-PCA9685 Controller"));
+  Serial.println(F("=========================================================="));
 
-  // Initialize PCA9685 boards
-  boardRight.begin();
-  boardRight.setOscillatorFrequency(OSC_FREQUENCY);
-  boardRight.setPWMFreq(SERVO_FREQ);
-  boardLeft.begin();
-  boardLeft.setOscillatorFrequency(OSC_FREQUENCY);
-  boardLeft.setPWMFreq(SERVO_FREQ);
-  Serial.println("[OK] I2C & PCA9685 initialized.");
-  delay(200);
+  // ---- I²C Bus ----
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setClock(400000);            // 400 kHz Fast-mode I²C
+  Serial.println(F("[I2C] Bus started: SDA=21, SCL=22, 400 kHz"));
 
-  // Setup Wi-Fi Access Point & Web Server
-  setupWiFi();
+  // ---- Detect PCA9685 boards ----
+  scanI2C();
 
-  // Initial stance
-  standUp();
+  // ---- Build leg/channel map ----
+  initLegs();
+
+  // ---- Initialise detected boards ----
+  if (boardMainOK) {
+    pcaMain.begin();
+    pcaMain.setPWMFreq(SERVO_FREQ);
+    delay(10);
+    Serial.println(F("[OK] PCA9685 (0x40) ready  -> Legs 1, 2, 3 (Right)"));
+  }
+  if (boardAuxOK) {
+    pcaAux.begin();
+    pcaAux.setPWMFreq(SERVO_FREQ);
+    delay(10);
+    Serial.println(F("[OK] PCA9685 (0x43) ready  -> Legs 4, 5, 6 (Left)"));
+  }
+
+  // ---- Propagate detection status to every joint ----
+  for (int i = 0; i < NUM_LEGS; i++) {
+    bool ok = (legs[i].L.board == &pcaMain) ? boardMainOK : boardAuxOK;
+    legs[i].L.active = ok;
+    legs[i].M.active = ok;
+    legs[i].D.active = ok;
+  }
+
+  // ---- Bluetooth ----
+  if (SerialBT.begin(BT_NAME)) {
+    Serial.printf("[OK] Bluetooth active: \"%s\"\n", BT_NAME);
+  } else {
+    Serial.println(F("[WARN] Bluetooth init failed"));
+  }
+
+  // ---- Safe startup: center every servo to 90° ----
+  centerAll();
+  // Guarantee every channel 0-15 on detected boards receives 90° (1500us / 307 ticks):
+  if (boardMainOK) {
+    for (uint8_t ch = 0; ch < 16; ch++) pcaMain.setPWM(ch, 0, 307);
+  }
+  if (boardAuxOK) {
+    for (uint8_t ch = 0; ch < 16; ch++) pcaAux.setPWM(ch, 0, 307);
+  }
+  Serial.println(F("[BOOT] All servos centered to 90 deg (1500 us / 307 ticks) — ready for commands."));
+  Serial.println();
+  printHelp();
 }
 
 // ===========================================================================
-// MAIN LOOP
+//  MAIN LOOP  (non-blocking)
 // ===========================================================================
 void loop() {
-  server.handleClient(); // Listen for Wi-Fi commands
+  // USB Serial commands
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.length() > 0) processCmd(cmd);
+  }
 
-  // Execute continuous movement based on current state
-  switch (currentState) {
-  case WALK_FWD:
-    tripodStep(STEP_LENGTH, 0.0f);
-    break;
-  case WALK_BWD:
-    tripodStep(-STEP_LENGTH, 0.0f);
-    break;
-  case TURN_LEFT:
-    tripodStep(0.0f, -TURN_LENGTH);
-    break;
-  case TURN_RIGHT:
-    tripodStep(0.0f, TURN_LENGTH);
-    break;
-  case IDLE:
-  default:
-    break; // Do nothing, hold position
+  // Bluetooth commands
+  if (SerialBT.available()) {
+    String cmd = SerialBT.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.length() > 0) processCmd(cmd);
+  }
+
+  // Continuous motion update (50 Hz, non-blocking)
+  updateMotion();
+}
+
+// ===========================================================================
+//  LEG / JOINT INITIALISATION
+// ===========================================================================
+
+void initJoint(Joint& j, Adafruit_PWMServoDriver* board, uint8_t ch,
+               float minA, float maxA) {
+  j.board  = board;
+  j.ch     = ch;
+  j.target = 90.0f;
+  j.angle  = 90.0f;
+  j.trim   = 0.0f;
+  j.minA   = minA;
+  j.maxA   = maxA;
+  j.inv    = false;
+  j.active = false;   // Updated after I²C scan
+}
+
+void initLegs() {
+  // ===== Board 0x40 (Main) — RIGHT SIDE: Legs 1, 2, 3 =====
+
+  // Leg 1 — Front Right:  D1=ch0, M1=ch1, L1=ch2
+  legs[0].num = 1;  legs[0].name = "Front Right";  legs[0].leftSide = false;
+  initJoint(legs[0].L, &pcaMain, 2,  30.0f, 150.0f);   // Coxa
+  initJoint(legs[0].M, &pcaMain, 1,  20.0f, 160.0f);   // Femur
+  initJoint(legs[0].D, &pcaMain, 0,  20.0f, 160.0f);   // Tibia
+
+  // Leg 2 — Mid Right:    D2=ch3, M2=ch4, L2=ch5
+  legs[1].num = 2;  legs[1].name = "Mid Right";    legs[1].leftSide = false;
+  initJoint(legs[1].L, &pcaMain, 5,  30.0f, 150.0f);
+  initJoint(legs[1].M, &pcaMain, 4,  20.0f, 160.0f);
+  initJoint(legs[1].D, &pcaMain, 3,  20.0f, 160.0f);
+
+  // Leg 3 — Rear Right:   D3=ch6, M3=ch7, L3=ch8
+  legs[2].num = 3;  legs[2].name = "Rear Right";   legs[2].leftSide = false;
+  initJoint(legs[2].L, &pcaMain, 8,  30.0f, 150.0f);
+  initJoint(legs[2].M, &pcaMain, 7,  20.0f, 160.0f);
+  initJoint(legs[2].D, &pcaMain, 6,  20.0f, 160.0f);
+
+  // ===== Board 0x43 (Aux) — LEFT SIDE: Legs 4, 5, 6 =====
+
+  // Leg 4 — Front Left:   D4=ch6, M4=ch7, L4=ch8
+  legs[3].num = 4;  legs[3].name = "Front Left";   legs[3].leftSide = true;
+  initJoint(legs[3].L, &pcaAux, 8,  30.0f, 150.0f);
+  initJoint(legs[3].M, &pcaAux, 7,  20.0f, 160.0f);
+  initJoint(legs[3].D, &pcaAux, 6,  20.0f, 160.0f);
+
+  // Leg 5 — Mid Left:     D5=ch3, M5=ch4, L5=ch5
+  legs[4].num = 5;  legs[4].name = "Mid Left";     legs[4].leftSide = true;
+  initJoint(legs[4].L, &pcaAux, 5,  30.0f, 150.0f);
+  initJoint(legs[4].M, &pcaAux, 4,  20.0f, 160.0f);
+  initJoint(legs[4].D, &pcaAux, 3,  20.0f, 160.0f);
+
+  // Leg 6 — Rear Left:    D6=ch0, M6=ch1, L6=ch2
+  legs[5].num = 6;  legs[5].name = "Rear Left";    legs[5].leftSide = true;
+  initJoint(legs[5].L, &pcaAux, 2,  30.0f, 150.0f);
+  initJoint(legs[5].M, &pcaAux, 1,  20.0f, 160.0f);
+  initJoint(legs[5].D, &pcaAux, 0,  20.0f, 160.0f);
+}
+
+// ===========================================================================
+//  SERVO CONTROL
+// ===========================================================================
+
+// Write a target angle to a single joint (applies trim + clamping + inversion)
+void writeJoint(Joint& j, float targetDeg) {
+  j.target = targetDeg;
+  float cmd = targetDeg + j.trim;
+  cmd = constrain(cmd, j.minA, j.maxA);
+  if (j.inv) {
+    cmd = 180.0f - cmd;
+  }
+  j.angle = cmd;
+
+  // Convert degrees (0..180) -> microseconds (500..2500 us)
+  uint16_t us = (uint16_t)map((long)(cmd * 10.0f), 0L, 1800L,
+                              (long)PULSE_MIN, (long)PULSE_MAX);
+  us = constrain(us, (uint16_t)PULSE_MIN, (uint16_t)PULSE_MAX);
+
+  // Convert microseconds to PCA9685 12-bit tick (50Hz = 20,000 us across 4096 counts)
+  // tick = us * 4096 / 20000 = us * 0.2048
+  uint16_t tick = (uint16_t)((float)us * 4096.0f / 20000.0f + 0.5f);
+  tick = constrain(tick, (uint16_t)100, (uint16_t)550);
+
+  if (j.board != nullptr) {
+    j.board->setPWM(j.ch, 0, tick);
+  }
+}
+
+// Set all 3 joints of one leg (by index 0–5)
+void setLeg(int idx, float lDeg, float mDeg, float dDeg) {
+  if (idx < 0 || idx >= NUM_LEGS) return;
+  writeJoint(legs[idx].L, lDeg);
+  writeJoint(legs[idx].M, mDeg);
+  writeJoint(legs[idx].D, dDeg);
+}
+
+// Center all 18 servos to 90°
+void centerAll() {
+  mode = MODE_HOLD;
+  for (int i = 0; i < NUM_LEGS; i++) setLeg(i, 90.0f, 90.0f, 90.0f);
+}
+
+// Stand pose: legs angled down for support
+void standAll() {
+  mode = MODE_HOLD;
+  for (int i = 0; i < NUM_LEGS; i++) setLeg(i, 90.0f, 60.0f, 120.0f);
+}
+
+// Relax: disable PWM on all channels (servos go limp)
+void relaxAll() {
+  mode = MODE_HOLD;
+  for (int i = 0; i < NUM_LEGS; i++) {
+    if (legs[i].L.active) legs[i].L.board->setPWM(legs[i].L.ch, 0, 4096);
+    if (legs[i].M.active) legs[i].M.board->setPWM(legs[i].M.ch, 0, 4096);
+    if (legs[i].D.active) legs[i].D.board->setPWM(legs[i].D.ch, 0, 4096);
   }
 }
 
 // ===========================================================================
-// WEB SERVER INTERFACE
+//  MOTION UPDATE DISPATCHER  (50 Hz, non-blocking)
 // ===========================================================================
-void setupWiFi() {
-  Serial.println("[>>] Starting Wi-Fi Access Point...");
-  WiFi.softAP(ssid, password);
+void updateMotion() {
+  unsigned long now = millis();
+  if (now - lastTickMs < UPDATE_INTERVAL) return;
+  float dt = (float)(now - lastTickMs) / 1000.0f;
+  lastTickMs = now;
 
-  IPAddress IP = WiFi.softAPIP();
-  Serial.print("[OK] Wi-Fi started! Connect to '");
-  Serial.print(ssid);
-  Serial.println("' with phone.");
-  Serial.print("     Then open browser to: http://");
-  Serial.println(IP);
-
-  server.on("/", handleRoot);
-  server.on("/cmd", handleCommand);
-  server.begin();
-  Serial.println("[OK] Web Server running.");
+  switch (mode) {
+    case MODE_HOLD:  break;                 // Nothing to do
+    case MODE_WALK:  updateWalk(now);  break;
+    case MODE_DANCE: updateDance(now); break;
+    case MODE_WAVE:  updateWave(now);  break;
+    case MODE_SWEEP: updateSweep(dt);  break;
+  }
 }
 
-void handleRoot() {
-  // Mobile-friendly HTML Gamepad UI
-  String html = "<!DOCTYPE html><html><head><meta name='viewport' "
-                "content='width=device-width, initial-scale=1, "
-                "maximum-scale=1, user-scalable=no'>";
-  html += "<title>Hexapod Control</title>";
-  html += "<style>";
-  html += "body { font-family: Arial, sans-serif; background-color: #1a1a1a; "
-          "color: #fff; text-align: center; margin: 0; padding: 20px; "
-          "user-select: none; }";
-  html += "h2 { color: #00ffcc; }";
-  html += ".grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: "
-          "15px; max-width: 400px; margin: 40px auto; }";
-  html +=
-      ".btn { background-color: #333; border: 2px solid #555; border-radius: "
-      "12px; color: white; padding: 25px 0; font-size: 24px; font-weight: "
-      "bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }";
-  html += ".btn:active { background-color: #00ffcc; color: #000; transform: "
-          "translateY(4px); box-shadow: none; }";
-  html +=
-      ".btn-stop { background-color: #ff3333; grid-column: 2; grid-row: 2; }";
-  html += ".btn-empty { visibility: hidden; }";
-  html += ".actions { display: flex; justify-content: center; gap: 20px; "
-          "margin-top: 30px; }";
-  html += ".btn-action { background-color: #007bff; border-radius: 8px; "
-          "padding: 15px 30px; font-size: 18px; border: none; color: white; }";
-  html += "</style>";
-  html += "<script>";
-  html += "function sendCmd(cmd) { fetch('/cmd?c=' + cmd); }";
-  html += "</script>";
-  html += "</head><body>";
+// ===========================================================================
+//  TRIPOD GAIT WALK
+//  Groups: A = Legs 1,3,5 (indices 0,2,4)   B = Legs 2,4,6 (indices 1,3,5)
+//  Group A swings while B supports, then they switch.
+// ===========================================================================
+void updateWalk(unsigned long now) {
+  float progress = (float)(now % walkPeriod) / (float)walkPeriod;   // 0.0 → 1.0
 
-  html += "<h2>🕷️ Hexapod Spider Controller</h2>";
+  for (int i = 0; i < NUM_LEGS; i++) {
+    // Even indices (0,2,4) = Group A,  Odd indices (1,3,5) = Group B
+    float phase = (i % 2 == 0) ? progress : fmodf(progress + 0.5f, 1.0f);
 
-  // Directional Pad
-  html += "<div class='grid'>";
-  html += "<div class='btn-empty'></div>";
-  html += "<button class='btn' onmousedown=\"sendCmd('F')\" "
-          "onmouseup=\"sendCmd('X')\" ontouchstart=\"sendCmd('F')\" "
-          "ontouchend=\"sendCmd('X')\">▲</button>";
-  html += "<div class='btn-empty'></div>";
+    // Left-side legs mirror the coxa swing direction
+    float cDir = legs[i].leftSide ? -1.0f : 1.0f;
 
-  html += "<button class='btn' onmousedown=\"sendCmd('L')\" "
-          "onmouseup=\"sendCmd('X')\" ontouchstart=\"sendCmd('L')\" "
-          "ontouchend=\"sendCmd('X')\">◄</button>";
-  html += "<button class='btn btn-stop' onclick=\"sendCmd('X')\">STOP</button>";
-  html += "<button class='btn' onmousedown=\"sendCmd('R')\" "
-          "onmouseup=\"sendCmd('X')\" ontouchstart=\"sendCmd('R')\" "
-          "ontouchend=\"sendCmd('X')\">►</button>";
+    float lA, mA, dA;
 
-  html += "<div class='btn-empty'></div>";
-  html += "<button class='btn' onmousedown=\"sendCmd('B')\" "
-          "onmouseup=\"sendCmd('X')\" ontouchstart=\"sendCmd('B')\" "
-          "ontouchend=\"sendCmd('X')\">▼</button>";
-  html += "<div class='btn-empty'></div>";
-  html += "</div>";
+    if (phase < 0.5f) {
+      // ---- Swing phase (leg in air, moving forward) ----
+      float t    = phase / 0.5f;                        // 0 → 1
+      float lift = sinf(t * PI);                        // arc 0→1→0
+      lA = 90.0f + cDir * (-walkSwing + 2.0f * walkSwing * t);
+      mA = 60.0f + walkLift * lift;                     // lift up
+      dA = 120.0f - 20.0f * lift;                       // tuck foot
+    } else {
+      // ---- Stance phase (leg on ground, pushing back) ----
+      float t = (phase - 0.5f) / 0.5f;                 // 0 → 1
+      lA = 90.0f + cDir * (walkSwing - 2.0f * walkSwing * t);
+      mA = 60.0f;                                      // hold down
+      dA = 120.0f;                                      // hold planted
+    }
 
-  // Action Buttons
-  html += "<div class='actions'>";
-  html +=
-      "<button class='btn-action' onclick=\"sendCmd('U')\">Stand Up</button>";
-  html += "<button class='btn-action' style='background-color:#555;' "
-          "onclick=\"sendCmd('D')\">Sit Down</button>";
-  html += "</div>";
-
-  html += "<p style='margin-top: 40px; font-size: 12px; color: #888;'>Hold "
-          "buttons to move. Release to stop.</p>";
-  html += "</body></html>";
-
-  server.send(200, "text/html", html);
+    setLeg(i, lA, mA, dA);
+  }
 }
 
-void handleCommand() {
-  if (server.hasArg("c")) {
-    String cmd = server.arg("c");
-    Serial.print("[Web CMD] Received: ");
-    Serial.println(cmd);
+// ===========================================================================
+//  DANCE ROUTINE  (16-second 4-phase choreography on all 6 legs)
+// ===========================================================================
+void updateDance(unsigned long now) {
+  uint32_t cycle = now % 16000;                         // 16-second loop
+  float tSec = (float)cycle / 1000.0f;
 
-    if (cmd == "F")
-      currentState = WALK_FWD;
-    else if (cmd == "B")
-      currentState = WALK_BWD;
-    else if (cmd == "L")
-      currentState = TURN_LEFT;
-    else if (cmd == "R")
-      currentState = TURN_RIGHT;
-    else if (cmd == "X") {
-      currentState = IDLE;
-      standUp();
-    } else if (cmd == "U") {
-      currentState = IDLE;
-      standUp();
-    } else if (cmd == "D") {
-      currentState = IDLE;
-      sitDown();
+  for (int i = 0; i < NUM_LEGS; i++) {
+    float cDir   = legs[i].leftSide ? -1.0f : 1.0f;
+    float phOff  = (float)i * 0.3f;                     // stagger between legs
+    float t      = tSec + phOff;
+
+    float lA, mA, dA;
+
+    // --- Phase 1 (0–4s): Hip Sway & Knee Bounce ---
+    if (cycle < 4000) {
+      lA = 90.0f + cDir * sinf(t * PI) * 35.0f;
+      mA = 65.0f + fabsf(sinf(t * 2.0f * PI)) * 30.0f;
+      dA = 110.0f + sinf(t * 2.0f * PI) * 20.0f;
+    }
+    // --- Phase 2 (4–8s): Rapid Toe Tap ---
+    else if (cycle < 8000) {
+      float st = t - 4.0f;
+      lA = 70.0f + cDir * (fmodf(fabsf(st), 4.0f) / 4.0f) * 40.0f;
+      mA = 80.0f + sinf(st * PI) * 10.0f;
+      dA = 95.0f + (sinf(st * 6.0f * PI) > 0.0f ? 35.0f : 0.0f);
+    }
+    // --- Phase 3 (8–12s): Can-Can High Kick ---
+    else if (cycle < 12000) {
+      float st     = t - 8.0f;
+      float kickPh = fmodf(fabsf(st), 2.0f);
+
+      if (kickPh < 1.0f) {
+        float kH = sinf(kickPh * PI);                   // kick arc
+        lA = 90.0f + cDir * sinf(kickPh * 2.0f * PI) * 25.0f;
+        mA = 60.0f + kH * 55.0f;                        // thigh lifts
+        dA = 120.0f - kH * 60.0f;                       // shin extends
+      } else {
+        float sp = kickPh - 1.0f;
+        lA = 90.0f + cDir * sinf(sp * 4.0f * PI) * 20.0f;  // shimmy
+        mA = 50.0f;
+        dA = 135.0f;
+      }
+    }
+    // --- Phase 4 (12–16s): Snake Body Wave ---
+    else {
+      float st = t - 12.0f;
+      float w  = st * 4.5f;
+      lA = 90.0f + cDir * sinf(w) * 32.0f;
+      mA = 75.0f + sinf(w - 1.05f) * 28.0f;
+      dA = 105.0f + sinf(w - 2.10f) * 32.0f;
+    }
+
+    setLeg(i, lA, mA, dA);
+  }
+}
+
+// ===========================================================================
+//  WAVE  (sequential lift propagating across all 6 legs)
+// ===========================================================================
+void updateWave(unsigned long now) {
+  float t = (float)(now % 3000) / 3000.0f;             // 3-second cycle
+
+  for (int i = 0; i < NUM_LEGS; i++) {
+    float phase = fmodf(t + (float)i / (float)NUM_LEGS, 1.0f);
+    float lift  = sinf(phase * 2.0f * PI);
+    lift = (lift > 0.0f) ? lift : 0.0f;                // only lift, no push below
+
+    float cDir = legs[i].leftSide ? -1.0f : 1.0f;
+    float lA = 90.0f + cDir * sinf(phase * 2.0f * PI) * 20.0f;
+    float mA = 60.0f + lift * 35.0f;
+    float dA = 120.0f - lift * 25.0f;
+
+    setLeg(i, lA, mA, dA);
+  }
+}
+
+// ===========================================================================
+//  SWEEP  (all legs synchronised 45° ↔ 135°)
+// ===========================================================================
+void updateSweep(float dt) {
+  sweepPos += sweepDir * sweepRate * dt;
+  if (sweepPos >= 135.0f) { sweepPos = 135.0f; sweepDir = -1.0f; }
+  if (sweepPos <=  45.0f) { sweepPos =  45.0f; sweepDir =  1.0f; }
+
+  for (int i = 0; i < NUM_LEGS; i++) {
+    setLeg(i, sweepPos, sweepPos, sweepPos);
+  }
+}
+
+// ===========================================================================
+//  I²C BUS SCANNER
+// ===========================================================================
+void scanI2C() {
+  Serial.println(F("[SCAN] Scanning I2C bus..."));
+  byte count = 0;
+  for (byte addr = 8; addr < 120; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("  -> 0x%02X", addr);
+      if (addr == PCA_MAIN_ADDR) { Serial.print(" [PCA9685 Right (0x40)]"); boardMainOK = true; }
+      if (addr == PCA_AUX_ADDR)  { Serial.print(" [PCA9685 Left (0x43)]");  boardAuxOK  = true; }
+      if (addr == 0x70)          { Serial.print(" [PCA9685 All-Call]"); }
+      Serial.println();
+      count++;
     }
   }
-  server.send(200, "text/plain", "OK");
+  if (!boardMainOK) Serial.println(F("[WARN] PCA9685 Right (0x40) NOT detected!"));
+  if (!boardAuxOK)  Serial.println(F("[WARN] PCA9685 Left  (0x43) NOT detected!"));
+  if (count == 0)   Serial.println(F("[ERROR] No I2C devices found! Check 3V3/GND/SDA/SCL wiring."));
+  Serial.printf("[SCAN] %d device(s) found.\n", count);
 }
 
 // ===========================================================================
-// MOVEMENT MACROS
+//  COMMAND PROCESSOR  (USB Serial + Bluetooth)
 // ===========================================================================
+void processCmd(String cmd) {
+  cmd.toUpperCase();
+  Serial.printf(">> %s\n", cmd.c_str());
+  SerialBT.printf(">> %s\n", cmd.c_str());
 
-void standUp() {
-  for (uint8_t leg = 0; leg < NUM_LEGS; leg++) {
-    moveLegTo(leg, STAND_X, STAND_Y, STAND_Z);
-  }
-  delay(100);
-}
+  // ======= Mode / Action Commands =======
 
-void sitDown() {
-  for (uint8_t leg = 0; leg < NUM_LEGS; leg++) {
-    moveLegTo(leg, STAND_X * 0.7f, STAND_Y, STAND_Z * 0.4f);
-  }
-  delay(100);
-}
-
-// ===========================================================================
-// TRIPOD GAIT (Single Cycle)
-// ===========================================================================
-void tripodStep(float dx, float dy) {
-  float footX[NUM_LEGS], footY[NUM_LEGS], footZ[NUM_LEGS];
-
-  // Base positions
-  for (uint8_t leg = 0; leg < NUM_LEGS; leg++) {
-    float mountRad = LEG_CFG[leg].mountAngle * DEG_TO_RAD;
-    footX[leg] = STAND_X;
-    footY[leg] = STAND_Y;
-    footZ[leg] = STAND_Z;
-  }
-
-  // --- PHASE 1: Lift Group A, Push Group B ---
-  for (int i = 0; i < 3; i++) {
-    uint8_t leg = TRIPOD_A[i];
-    moveLegTo(leg, footX[leg] + dx * 0.5f, footY[leg] + dy * 0.5f,
-              STAND_Z + STEP_HEIGHT);
-  }
-  server.handleClient();
-  delay(GAIT_SPEED * 3);
-
-  for (int i = 0; i < 3; i++) {
-    uint8_t legA = TRIPOD_A[i], legB = TRIPOD_B[i];
-    moveLegTo(legA, footX[legA] + dx, footY[legA] + dy,
-              STAND_Z); // A Lands ahead
-    moveLegTo(legB, footX[legB] - dx, footY[legB] - dy,
-              STAND_Z); // B Pushes back
-  }
-  server.handleClient();
-  delay(GAIT_SPEED * 3);
-
-  // --- PHASE 2: Lift Group B, Push Group A ---
-  for (int i = 0; i < 3; i++) {
-    uint8_t leg = TRIPOD_B[i];
-    moveLegTo(leg, footX[leg] + dx * 0.5f, footY[leg] + dy * 0.5f,
-              STAND_Z + STEP_HEIGHT);
-  }
-  server.handleClient();
-  delay(GAIT_SPEED * 3);
-
-  for (int i = 0; i < 3; i++) {
-    uint8_t legA = TRIPOD_A[i], legB = TRIPOD_B[i];
-    moveLegTo(legB, footX[legB] + dx, footY[legB] + dy,
-              STAND_Z); // B Lands ahead
-    moveLegTo(legA, footX[legA] - dx, footY[legA] - dy,
-              STAND_Z); // A Pushes back
-  }
-  server.handleClient();
-  delay(GAIT_SPEED * 3);
-}
-
-// ===========================================================================
-// INVERSE KINEMATICS (IK)
-// ===========================================================================
-bool solveIK(uint8_t leg, float x, float y, float z, float &coxaDeg,
-             float &femurDeg, float &tibiaDeg) {
-  coxaDeg = atan2f(y, x) * RAD_TO_DEG;
-  float L = sqrtf(x * x + y * y) - COXA_LEN;
-  float D = sqrtf(L * L + z * z);
-
-  float maxReach = FEMUR_LEN + TIBIA_LEN - 1.0f;
-  if (D > maxReach)
-    D = maxReach; // Clamp
-
-  float cosT = (D * D - FEMUR_LEN * FEMUR_LEN - TIBIA_LEN * TIBIA_LEN) /
-               (2.0f * FEMUR_LEN * TIBIA_LEN);
-  tibiaDeg = acosf(constrain(cosT, -1.0f, 1.0f)) * RAD_TO_DEG;
-
-  float alpha = atan2f(-z, L) * RAD_TO_DEG;
-  float beta =
-      asinf((TIBIA_LEN * sinf(tibiaDeg * DEG_TO_RAD)) / D) * RAD_TO_DEG;
-  femurDeg = alpha + beta;
-
-  // Map to servo neutral (90°)
-  coxaDeg += 90.0f;
-  femurDeg += 90.0f;
-  tibiaDeg = 180.0f - tibiaDeg; // Invert for knee-forward
-
-  if (LEG_CFG[leg].isLeft)
-    coxaDeg = 180.0f - coxaDeg; // Mirror left legs
-
-  coxaDeg = constrain(coxaDeg, 0.0f, 180.0f);
-  femurDeg = constrain(femurDeg, 0.0f, 180.0f);
-  tibiaDeg = constrain(tibiaDeg, 0.0f, 180.0f);
-  return true;
-}
-
-void moveLegTo(uint8_t leg, float x, float y, float z) {
-  float coxa, femur, tibia;
-  if (!solveIK(leg, x, y, z, coxa, femur, tibia))
+  if (cmd == "HELP" || cmd == "?") {
+    printHelp();
     return;
+  }
+  if (cmd == "STATUS" || cmd == "P") {
+    printStatus();
+    return;
+  }
+  if (cmd == "CENTER" || cmd == "C") {
+    centerAll();
+    Serial.println(F("[OK] All 18 servos centered to 90 deg"));
+    SerialBT.println(F("OK:CENTER"));
+    return;
+  }
+  if (cmd == "STAND") {
+    standAll();
+    Serial.println(F("[OK] Stand pose: L=90 M=60 D=120"));
+    SerialBT.println(F("OK:STAND"));
+    return;
+  }
+  if (cmd == "WALK" || cmd == "GAIT" || cmd == "STEP") {
+    mode = MODE_WALK;
+    Serial.println(F("[OK] Tripod gait walk active"));
+    SerialBT.println(F("OK:WALK"));
+    return;
+  }
+  if (cmd == "DANCE" || cmd == "PARTY") {
+    mode = MODE_DANCE;
+    Serial.println(F("[OK] Dance routine active (16-sec cycle)"));
+    SerialBT.println(F("OK:DANCE"));
+    return;
+  }
+  if (cmd == "WAVE") {
+    mode = MODE_WAVE;
+    Serial.println(F("[OK] Wave motion active"));
+    SerialBT.println(F("OK:WAVE"));
+    return;
+  }
+  if (cmd == "SWEEP" || cmd == "S") {
+    mode = MODE_SWEEP;
+    sweepPos = 90.0f;
+    sweepDir = 1.0f;
+    Serial.println(F("[OK] Sweep active (45-135 deg)"));
+    SerialBT.println(F("OK:SWEEP"));
+    return;
+  }
+  if (cmd == "STOP" || cmd == "X") {
+    mode = MODE_HOLD;
+    Serial.println(F("[OK] Stopped — holding position"));
+    SerialBT.println(F("OK:STOP"));
+    return;
+  }
+  if (cmd == "RELAX") {
+    relaxAll();
+    Serial.println(F("[OK] All servos relaxed (PWM off, limp)"));
+    SerialBT.println(F("OK:RELAX"));
+    return;
+  }
+  if (cmd == "SCAN") {
+    boardMainOK = false;
+    boardAuxOK  = false;
+    scanI2C();
+    // Re-init boards if newly detected
+    if (boardMainOK) {
+      pcaMain.begin();
+      pcaMain.setOscillatorFrequency(OSC_FREQ);
+      pcaMain.setPWMFreq(SERVO_FREQ);
+    }
+    if (boardAuxOK) {
+      pcaAux.begin();
+      pcaAux.setOscillatorFrequency(OSC_FREQ);
+      pcaAux.setPWMFreq(SERVO_FREQ);
+    }
+    for (int i = 0; i < NUM_LEGS; i++) {
+      bool ok = (legs[i].L.board == &pcaMain) ? boardMainOK : boardAuxOK;
+      legs[i].L.active = ok;
+      legs[i].M.active = ok;
+      legs[i].D.active = ok;
+    }
+    return;
+  }
+  if (cmd == "SWAP") {
+    for (int i = 0; i < NUM_LEGS; i++) {
+      legs[i].L.board = (legs[i].L.board == &pcaMain) ? &pcaAux : &pcaMain;
+      legs[i].M.board = (legs[i].M.board == &pcaMain) ? &pcaAux : &pcaMain;
+      legs[i].D.board = (legs[i].D.board == &pcaMain) ? &pcaAux : &pcaMain;
+      bool ok = (legs[i].L.board == &pcaMain) ? boardMainOK : boardAuxOK;
+      legs[i].L.active = ok;
+      legs[i].M.active = ok;
+      legs[i].D.active = ok;
+    }
+    for (int i = 0; i < NUM_LEGS; i++) {
+      writeJoint(legs[i].L, legs[i].L.target);
+      writeJoint(legs[i].M, legs[i].M.target);
+      writeJoint(legs[i].D, legs[i].D.target);
+    }
+    uint8_t lAddr = (legs[3].L.board == &pcaMain) ? PCA_MAIN_ADDR : PCA_AUX_ADDR;
+    uint8_t rAddr = (legs[0].L.board == &pcaMain) ? PCA_MAIN_ADDR : PCA_AUX_ADDR;
+    Serial.printf("[OK] Swapped PCA boards! Left (Legs 4-6) on 0x%02X, Right (Legs 1-3) on 0x%02X\n", lAddr, rAddr);
+    SerialBT.printf("OK:SWAP L=0x%02X R=0x%02X\n", lAddr, rAddr);
+    return;
+  }
 
-  setAngle(leg, 0, coxa);
-  setAngle(leg, 1, femur);
-  setAngle(leg, 2, tibia);
+  // ======= Individual Joint: L1–L6, M1–M6, D1–D6 =======
+  // Format: "L3 45"  or  "D6 120"
+  if (cmd.length() >= 4
+      && (cmd[0] == 'L' || cmd[0] == 'M' || cmd[0] == 'D')
+      && cmd[1] >= '1' && cmd[1] <= '6'
+      && cmd[2] == ' ') {
+    char jt  = cmd[0];
+    int  idx = cmd[1] - '1';               // 0-based leg index
+    float a  = cmd.substring(3).toFloat();
+    mode = MODE_HOLD;
+
+    Joint* j = (jt == 'L') ? &legs[idx].L :
+               (jt == 'M') ? &legs[idx].M : &legs[idx].D;
+    writeJoint(*j, a);
+    Serial.printf("[OK] %c%d -> %.1f deg (ch%d on 0x%02X)\n",
+                  jt, idx + 1, a, j->ch,
+                  (j->board == &pcaMain) ? PCA_MAIN_ADDR : PCA_AUX_ADDR);
+    SerialBT.printf("OK:%c%d=%.1f\n", jt, idx + 1, a);
+    return;
+  }
+
+  // Legacy single-joint: "L 45" → defaults to Leg 1
+  if (cmd.length() >= 3
+      && (cmd[0] == 'L' || cmd[0] == 'M' || cmd[0] == 'D')
+      && cmd[1] == ' ') {
+    char jt = cmd[0];
+    float a = cmd.substring(2).toFloat();
+    mode = MODE_HOLD;
+
+    Joint* j = (jt == 'L') ? &legs[0].L :
+               (jt == 'M') ? &legs[0].M : &legs[0].D;
+    writeJoint(*j, a);
+    Serial.printf("[OK] %c1 -> %.1f deg (default leg 1)\n", jt, a);
+    SerialBT.printf("OK:%c1=%.1f\n", jt, a);
+    return;
+  }
+
+  // ======= Full Leg: "LEG 3 90 60 120" =======
+  if (cmd.startsWith("LEG ")) {
+    int n;
+    float lv, mv, dv;
+    if (sscanf(cmd.c_str(), "LEG %d %f %f %f", &n, &lv, &mv, &dv) == 4) {
+      if (n >= 1 && n <= 6) {
+        mode = MODE_HOLD;
+        setLeg(n - 1, lv, mv, dv);
+        Serial.printf("[OK] Leg %d -> L=%.1f M=%.1f D=%.1f\n", n, lv, mv, dv);
+        SerialBT.printf("OK:LEG%d\n", n);
+      } else {
+        Serial.println(F("[ERR] Leg number must be 1-6"));
+      }
+    } else {
+      Serial.println(F("[ERR] Usage: LEG <1-6> <L_deg> <M_deg> <D_deg>"));
+    }
+    return;
+  }
+
+  // ======= SET all legs: "SET 90 60 120" =======
+  if (cmd.startsWith("SET ")) {
+    float lv, mv, dv;
+    if (sscanf(cmd.c_str(), "SET %f %f %f", &lv, &mv, &dv) == 3) {
+      mode = MODE_HOLD;
+      for (int i = 0; i < NUM_LEGS; i++) setLeg(i, lv, mv, dv);
+      Serial.printf("[OK] All legs -> L=%.1f M=%.1f D=%.1f\n", lv, mv, dv);
+      SerialBT.println(F("OK:SET"));
+    } else {
+      Serial.println(F("[ERR] Usage: SET <L_deg> <M_deg> <D_deg>"));
+    }
+    return;
+  }
+
+  // ======= ALL servos to one angle: "ALL 90" =======
+  if (cmd.startsWith("ALL ")) {
+    float a = cmd.substring(4).toFloat();
+    mode = MODE_HOLD;
+    for (int i = 0; i < NUM_LEGS; i++) setLeg(i, a, a, a);
+    uint16_t us = (uint16_t)map((long)(a * 10.0f), 0L, 1800L, PULSE_MIN, PULSE_MAX);
+    uint16_t tick = (uint16_t)((float)us * 4096.0f / 20000.0f + 0.5f);
+    tick = constrain(tick, (uint16_t)100, (uint16_t)550);
+    if (boardMainOK) {
+      for (uint8_t ch = 0; ch < 16; ch++) pcaMain.setPWM(ch, 0, tick);
+    }
+    if (boardAuxOK) {
+      for (uint8_t ch = 0; ch < 16; ch++) pcaAux.setPWM(ch, 0, tick);
+    }
+    Serial.printf("[OK] All servos -> %.1f deg (tick=%d on ch 0-15)\n", a, tick);
+    SerialBT.printf("OK:ALL=%.1f\n", a);
+    return;
+  }
+
+  // ======= TRIM calibration: "TRIM L1 +5" or just "TRIM" to view =======
+  if (cmd.startsWith("TRIM")) {
+    // "TRIM L1 +5" → cmd[5]='L', cmd[6]='1', cmd[7]=' ', cmd[8..]="+5"
+    if (cmd.length() >= 9
+        && (cmd[5] == 'L' || cmd[5] == 'M' || cmd[5] == 'D')
+        && cmd[6] >= '1' && cmd[6] <= '6'
+        && cmd[7] == ' ') {
+      char jt  = cmd[5];
+      int  idx = cmd[6] - '1';
+      float offset = cmd.substring(8).toFloat();
+
+      Joint* j = (jt == 'L') ? &legs[idx].L :
+                 (jt == 'M') ? &legs[idx].M : &legs[idx].D;
+      j->trim = offset;
+      writeJoint(*j, j->target);            // Re-apply with new trim
+      Serial.printf("[OK] TRIM %c%d = %+.1f deg\n", jt, idx + 1, offset);
+      SerialBT.printf("OK:TRIM_%c%d=%+.1f\n", jt, idx + 1, offset);
+    } else {
+      // Show all current trims
+      Serial.println(F("\n--- TRIM OFFSETS ---"));
+      for (int i = 0; i < NUM_LEGS; i++) {
+        Serial.printf("  Leg %d %-12s  L=%+5.1f  M=%+5.1f  D=%+5.1f\n",
+                      legs[i].num, legs[i].name,
+                      legs[i].L.trim, legs[i].M.trim, legs[i].D.trim);
+      }
+      Serial.println(F("Usage: TRIM <L|M|D><1-6> <offset>  e.g. TRIM L1 +5"));
+    }
+    return;
+  }
+
+  // ======= INVERT direction: "INV L1" or just "INV" to view =======
+  if (cmd.startsWith("INV")) {
+    if (cmd.length() >= 6
+        && (cmd[4] == 'L' || cmd[4] == 'M' || cmd[4] == 'D')
+        && cmd[5] >= '1' && cmd[5] <= '6') {
+      char jt  = cmd[4];
+      int  idx = cmd[5] - '1';
+
+      Joint* j = (jt == 'L') ? &legs[idx].L :
+                 (jt == 'M') ? &legs[idx].M : &legs[idx].D;
+      j->inv = !j->inv;
+      writeJoint(*j, j->target);
+      Serial.printf("[OK] %c%d direction: %s\n",
+                    jt, idx + 1, j->inv ? "INVERTED (180-deg)" : "NORMAL");
+      SerialBT.printf("OK:INV_%c%d=%d\n", jt, idx + 1, j->inv ? 1 : 0);
+    } else {
+      Serial.println(F("\n--- JOINT DIRECTION INVERSIONS ---"));
+      for (int i = 0; i < NUM_LEGS; i++) {
+        Serial.printf("  Leg %d %-12s  L=%-4s  M=%-4s  D=%-4s\n",
+                      legs[i].num, legs[i].name,
+                      legs[i].L.inv ? "INV" : "NORM",
+                      legs[i].M.inv ? "INV" : "NORM",
+                      legs[i].D.inv ? "INV" : "NORM");
+      }
+      Serial.println(F("Usage: INV <L|M|D><1-6>  e.g. INV M1"));
+    }
+    return;
+  }
+
+  // ======= Walk tuning: "WALKSPEED 1500" / "WALKSWING 30" / "WALKLIFT 40" =======
+  if (cmd.startsWith("WALKSPEED ")) {
+    walkPeriod = (uint32_t)cmd.substring(10).toInt();
+    if (walkPeriod < 500)  walkPeriod = 500;
+    if (walkPeriod > 8000) walkPeriod = 8000;
+    Serial.printf("[OK] Walk period = %lu ms\n", walkPeriod);
+    SerialBT.printf("OK:WALKSPEED=%lu\n", walkPeriod);
+    return;
+  }
+  if (cmd.startsWith("WALKSWING ")) {
+    walkSwing = cmd.substring(10).toFloat();
+    walkSwing = constrain(walkSwing, 5.0f, 45.0f);
+    Serial.printf("[OK] Walk swing = %.1f deg\n", walkSwing);
+    return;
+  }
+  if (cmd.startsWith("WALKLIFT ")) {
+    walkLift = cmd.substring(9).toFloat();
+    walkLift = constrain(walkLift, 10.0f, 60.0f);
+    Serial.printf("[OK] Walk lift = %.1f deg\n", walkLift);
+    return;
+  }
+
+  // ======= Unknown =======
+  Serial.println(F("[ERR] Unknown command. Type HELP or ?"));
+  SerialBT.println(F("ERR:UNKNOWN"));
 }
 
 // ===========================================================================
-// SERVO HARDWARE CONTROL
+//  HELP MENU
 // ===========================================================================
-void setAngle(uint8_t leg, uint8_t joint, float degrees) {
-  uint16_t pulse = map((long)degrees, 0, 180, PULSE_MIN, PULSE_MAX);
-  setPulse(leg, joint, pulse);
+void printHelp() {
+  Serial.println(F("\n----------------------------------------------------------"));
+  Serial.println(F("  HEXAPOD COMMAND REFERENCE  (USB Serial + Bluetooth)"));
+  Serial.println(F("----------------------------------------------------------"));
+  Serial.println(F(" Motion Modes:"));
+  Serial.println(F("   WALK / GAIT / STEP  -> Tripod gait walk"));
+  Serial.println(F("   DANCE / PARTY       -> 16-sec choreographed dance"));
+  Serial.println(F("   WAVE                -> Sequential leg wave"));
+  Serial.println(F("   SWEEP / S           -> Synchronised sweep 45-135 deg"));
+  Serial.println(F("   STOP / X            -> Stop motion, hold position"));
+  Serial.println(F("   RELAX               -> Disable PWM (servos go limp)"));
+  Serial.println(F(""));
+  Serial.println(F(" Poses:"));
+  Serial.println(F("   CENTER / C          -> All servos to 90 deg"));
+  Serial.println(F("   STAND               -> Standing stance (90/60/120)"));
+  Serial.println(F(""));
+  Serial.println(F(" Individual Joint Control:"));
+  Serial.println(F("   L1 <deg> ... L6 <deg>   -> Set Coxa angle"));
+  Serial.println(F("   M1 <deg> ... M6 <deg>   -> Set Femur angle"));
+  Serial.println(F("   D1 <deg> ... D6 <deg>   -> Set Tibia angle"));
+  Serial.println(F("   L <deg>  / M <deg> / D <deg> -> Default to Leg 1"));
+  Serial.println(F(""));
+  Serial.println(F(" Multi-Joint:"));
+  Serial.println(F("   LEG <n> <L> <M> <D> -> Set all 3 joints of leg n"));
+  Serial.println(F("   SET <L> <M> <D>     -> Set all 6 legs to same pose"));
+  Serial.println(F("   ALL <deg>           -> Set all 18 servos to one angle"));
+  Serial.println(F(""));
+  Serial.println(F(" Calibration & Inversion:"));
+  Serial.println(F("   TRIM <J><n> <offset> -> Set trim (e.g. TRIM L1 +5)"));
+  Serial.println(F("   TRIM                 -> Show all current trims"));
+  Serial.println(F("   INV <J><n>           -> Toggle direction inversion (e.g. INV M1)"));
+  Serial.println(F("   INV                  -> Show all joint inversion states"));
+  Serial.println(F(""));
+  Serial.println(F(" Walk Tuning:"));
+  Serial.println(F("   WALKSPEED <ms>       -> Gait period (500-8000, def 2000)"));
+  Serial.println(F("   WALKSWING <deg>      -> Coxa swing range (5-45, def 25)"));
+  Serial.println(F("   WALKLIFT <deg>       -> Femur lift height (10-60, def 30)"));
+  Serial.println(F(""));
+  Serial.println(F(" Diagnostics:"));
+  Serial.println(F("   STATUS / P          -> Full system status"));
+  Serial.println(F("   SCAN                -> Re-scan I2C bus"));
+  Serial.println(F("   SWAP                -> Swap Right & Left PCA board IDs live"));
+  Serial.println(F("   HELP / ?            -> This menu"));
+  Serial.println(F("----------------------------------------------------------\n"));
 }
 
-void setPulse(uint8_t leg, uint8_t joint, uint16_t pulseMicros) {
-  uint8_t channel = (leg % 3) * 3 + joint;
-  if (leg < 3)
-    boardRight.writeMicroseconds(channel, pulseMicros);
-  else
-    boardLeft.writeMicroseconds(channel, pulseMicros);
+// ===========================================================================
+//  STATUS DISPLAY
+// ===========================================================================
+void printStatus() {
+  Serial.println(F("\n=================== HEXAPOD STATUS ===================="));
+  Serial.printf("  Board 0x40 (Right): %s    Board 0x43 (Left): %s\n",
+                boardMainOK ? "OK" : "MISSING",
+                boardAuxOK  ? "OK" : "MISSING");
+  Serial.println(F("-------------------------------------------------------"));
+
+  for (int i = 0; i < NUM_LEGS; i++) {
+    uint8_t addr = (legs[i].L.board == &pcaMain) ? PCA_MAIN_ADDR : PCA_AUX_ADDR;
+    Serial.printf(" Leg %d  %-12s  [0x%02X %s]\n",
+                  legs[i].num, legs[i].name, addr,
+                  legs[i].L.active ? "OK" : "--");
+    Serial.printf("   L(Coxa) :ch%d = %5.1f deg  trim=%+5.1f  dir=%s\n",
+                  legs[i].L.ch, legs[i].L.angle, legs[i].L.trim, legs[i].L.inv ? "INV" : "NORM");
+    Serial.printf("   M(Femur):ch%d = %5.1f deg  trim=%+5.1f  dir=%s\n",
+                  legs[i].M.ch, legs[i].M.angle, legs[i].M.trim, legs[i].M.inv ? "INV" : "NORM");
+    Serial.printf("   D(Tibia):ch%d = %5.1f deg  trim=%+5.1f  dir=%s\n",
+                  legs[i].D.ch, legs[i].D.angle, legs[i].D.trim, legs[i].D.inv ? "INV" : "NORM");
+  }
+
+  Serial.println(F("-------------------------------------------------------"));
+  const char* modeStr =
+    (mode == MODE_HOLD)  ? "HOLD (static)" :
+    (mode == MODE_WALK)  ? "WALK (tripod gait)" :
+    (mode == MODE_DANCE) ? "DANCE (16-sec cycle)" :
+    (mode == MODE_WAVE)  ? "WAVE (sequential)" : "SWEEP (45-135)";
+  Serial.printf(" Mode: %s\n", modeStr);
+  Serial.printf(" Walk: period=%lu ms  swing=%.0f deg  lift=%.0f deg\n",
+                walkPeriod, walkSwing, walkLift);
+  Serial.println(F("=======================================================\n"));
 }

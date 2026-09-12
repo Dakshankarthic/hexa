@@ -2,10 +2,10 @@
 
 > **Project Owner:** Dakshan  
 > **Start Date:** April 2026  
-> **Last Updated:** 2026-05-01 00:44 IST  
-> **Previous Updates:** 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
-> **Phase 2 Status:** Finished on 2026-05-01 — Single-Leg Subassembly Testing (3× 360° servos)
-> **Current Status:** Phase 3/4 — 18-Servo IK Firmware & Wi-Fi Control Implementation
+> **Last Updated:** 2026-09-12 20:20 IST  
+> **Previous Updates:** 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
+> **Phase 2 Status:** Finished on 2026-09-04 — Single-Leg Subassembly Testing Verified (L=Ch0, M=Ch1, D=Ch2 fully coordinated & dancing)
+> **Current Status:** Phase 3 — Full 18-servo dual-PCA9685 controller (0x40 Right, 0x43 Left) with direction inversion (INV), trim calibration, gait choreography, and live SWAP command.
 
 ---
 
@@ -127,6 +127,18 @@ ESP32 D22  ──── SCL (Board 1) ──── SCL (Board 2)    [I²C Clock]
 
 > ⚠️ **NEVER connect ESP32 3V3 to PCA9685 V+!** V+ gets 6V from the ZX-052 buck.
 
+### PCA9685 Hardware Address Configuration (A0 Solder Bridge)
+
+The PCA9685 module has 6 address selection pads along the upper edge of the PCB: `A0`, `A1`, `A2`, `A3`, `A4`, `A5`.
+Each pad consists of two small exposed copper contacts separated by a narrow slit.
+
+- **Base I²C Address:** `0x40` (binary `0b1000000`) when all pads are open / unbridged.
+- **Address Formula:** $\text{Address} = 0\text{x}40 + (A_5 \cdot 32 + A_4 \cdot 16 + A_3 \cdot 8 + A_2 \cdot 4 + A_1 \cdot 2 + A_0 \cdot 1)$
+- **Board 1 (Right Side — 0x40):** Leave all pads untouched (open).
+- **Board 2 (Left Side — 0x41):** Bridge the two halves of the **`A0`** solder pad with a small drop of solder:
+  - `A0` bridged = $+1 \implies 0\text{x}40 + 0\text{x}01 = \mathbf{0\text{x}41}$.
+  - Leave `A1`, `A2`, `A3`, `A4`, `A5` untouched / open.
+
 ### Power Wiring
 
 ```
@@ -139,36 +151,78 @@ Bonka 3S LiPo (11.1V)
                          └── Onboard regulator → 5V & 3.3V for ESP32 logic
 ```
 
-### Servo Channel Map (18-Servo Target)
+### Servo Channel Map (18-Servo — Confirmed 2026-09-08)
 
-#### Board 1 — `0x40` (Right Side, no solder pad change)
+> ⚠️ Joint order per leg is **D, M, L** (Tibia first, Coxa last on each 3-channel group).
 
-| Leg | Name | High (Coxa) | Mid (Femur) | Down (Tibia) |
-|-----|------|-------------|-------------|--------------|
-| 1 | Front Right | L1 (ch 0) | M1 (ch 1) | D1 (ch 2) |
-| 2 | Mid Right | L2 (ch 3) | M2 (ch 4) | D2 (ch 5) |
-| 3 | Rear Right | L3 (ch 6) | M3 (ch 7) | D3 (ch 8) |
+#### Board 1 — `0x40` Main (Right Side: Legs 1, 2, 3)
 
-#### Board 2 — `0x41` (Left Side, bridge A0 solder pad)
+| Channel | Servo | Leg |
+|---------|-------|-----|
+| ch 0 | D1 (Tibia) | Leg 1 — Front Right |
+| ch 1 | M1 (Femur) | Leg 1 — Front Right |
+| ch 2 | L1 (Coxa) | Leg 1 — Front Right |
+| ch 3 | D2 (Tibia) | Leg 2 — Mid Right |
+| ch 4 | M2 (Femur) | Leg 2 — Mid Right |
+| ch 5 | L2 (Coxa) | Leg 2 — Mid Right |
+| ch 6 | D3 (Tibia) | Leg 3 — Rear Right |
+| ch 7 | M3 (Femur) | Leg 3 — Rear Right |
+| ch 8 | L3 (Coxa) | Leg 3 — Rear Right |
 
-| Leg | Name | High (Coxa) | Mid (Femur) | Down (Tibia) |
-|-----|------|-------------|-------------|--------------|
-| 4 | Front Left | L4 (ch 0) | M4 (ch 1) | D4 (ch 2) |
-| 5 | Mid Left | L5 (ch 3) | M5 (ch 4) | D5 (ch 5) |
-| 6 | Rear Left | L6 (ch 6) | M6 (ch 7) | D6 (ch 8) |
+#### Board 2 — `0x43` Aux (Left Side: Legs 6, 5, 4 — A0+A1 bridged)
 
-### Current Test Setup (3 Servos Only)
+| Channel | Servo | Leg |
+|---------|-------|-----|
+| ch 0 | D6 (Tibia) | Leg 6 — Rear Left |
+| ch 1 | M6 (Femur) | Leg 6 — Rear Left |
+| ch 2 | L6 (Coxa) | Leg 6 — Rear Left |
+| ch 3 | D5 (Tibia) | Leg 5 — Mid Left |
+| ch 4 | M5 (Femur) | Leg 5 — Mid Left |
+| ch 5 | L5 (Coxa) | Leg 5 — Mid Left |
+| ch 6 | D4 (Tibia) | Leg 4 — Front Left |
+| ch 7 | M4 (Femur) | Leg 4 — Front Left |
+| ch 8 | L4 (Coxa) | Leg 4 — Front Left |
+
+### Physical Kinematics & Leg Layout (Confirmed 2026-09-08)
+
+#### Top View — Leg Layout & Gait Direction
 
 ```
-ESP32 D21 (SDA) ─── PCA9685 (0x40) SDA
-ESP32 D22 (SCL) ─── PCA9685 (0x40) SCL
-ESP32 3V3       ─── PCA9685 (0x40) VCC
-ESP32 GND       ─── PCA9685 (0x40) GND
-ZX-052 6V OUT   ─── PCA9685 (0x40) V+
+                 ▲ FRONT (Forward Gait Direction)
+          Leg 4 ╲       ╱ Leg 1 (Front Right)
+                 ╲ ─── ╱
+   (Mid Left) Leg 5 │   │ Leg 2 (Mid Right)
+                 ╱ ─── ╲
+          Leg 6 ╱       ╲ Leg 3 (Rear Right)
+                 ▼ REAR
+```
 
-PCA9685 Channel 0 ─── 360° Servo (High - L1)
-PCA9685 Channel 1 ─── 360° Servo (Mid - M1)
-PCA9685 Channel 2 ─── 360° Servo (Down - D1)
+- **Tripod Group A:** Legs 1, 3, 5 (Front Right, Rear Right, Mid Left)
+- **Tripod Group B:** Legs 2, 4, 6 (Mid Right, Front Left, Rear Left)
+- **Symmetry:** Left-side coxa swing is mirrored relative to right-side for forward locomotion.
+
+#### Side View — 3-DOF Joint Motion Axes
+
+```
+  Hexapod Chassis ──[L: Coxa (Yaw)]──┬──[M: Femur (Pitch)]──┬──[D: Tibia (Pitch)]── Foot Contact
+                                     │                      │
+                           (Horizontal Swing)       (Vertical Lift)      (Ground Contact)
+```
+
+| Joint | Anatomical Name | Motion Axis | Function | Default Pose |
+|-------|-----------------|-------------|----------|--------------|
+| **L** | Coxa (Hip) | Horizontal (Yaw) | Swings leg forward & backward for walking | 90° (Neutral) |
+| **M** | Femur (Thigh) | Vertical (Pitch) | Lifts leg off ground during swing phase | 60° (Stand) / 90° (Center) |
+| **D** | Tibia (Shin/Foot) | Vertical (Pitch) | Extends down to push or tucks during step | 120° (Stand) / 90° (Center) |
+
+### Dual PCA9685 I²C Daisy-Chain Bus
+
+```
+ESP32 D21 (SDA) ──┬── PCA9685 Main (0x40) SDA ──┬── PCA9685 Aux (0x41) SDA
+ESP32 D22 (SCL) ──┼── PCA9685 Main (0x40) SCL ──┼── PCA9685 Aux (0x41) SCL
+ESP32 3V3       ──┼── PCA9685 Main (0x40) VCC ──┼── PCA9685 Aux (0x41) VCC
+ESP32 GND       ──┼── PCA9685 Main (0x40) GND ──┼── PCA9685 Aux (0x41) GND
+ZX-052 6V OUT   ──┴── PCA9685 Main (0x40) V+  ──┴── PCA9685 Aux (0x41) V+
 ```
 
 ---
@@ -217,11 +271,12 @@ PCA9685 Channel 2 ─── 360° Servo (Down - D1)
 ### Project Structure (PlatformIO)
 
 ```
-e:\hexa\
-├── platformio.ini          ← PlatformIO config (ESP32 + Adafruit PCA9685)
+d:\hexa\
+├── platformio.ini          ← PlatformIO config (ESP32 + Adafruit PCA9685 + BT)
 ├── src\
-│   └── main.cpp            ← Current firmware: 3× 360° servo test & calibration
-└── README.md               ← This file
+│   └── main.cpp            ← Full 18-servo dual-PCA9685 controller firmware
+├── rule_book_dk.md         ← This file (full project reference)
+└── README.md               ← Quick readme
 ```
 
 ### platformio.ini Config
@@ -285,6 +340,7 @@ pio device monitor
 - [x] 3× 360° servos respond to pulse commands
 - [x] Serial command interface for speed control and calibration
 - [x] PlatformIO project compiles and uploads successfully
+- [x] Single 3-DOF leg (L=Ch0, M=Ch1, D=Ch2) verified with coordinated dance & step motion
 - [x] ZX-052 buck converter providing 6V to servo V+
 
 ### What's Next 🔜
@@ -380,6 +436,39 @@ All information provided by the project owner, timestamped for reference.
 | 2026-04-30 18:36 IST | Speed question | Asked about increasing 360° servo speed (can push to 500–2500us range) |
 | 2026-04-30 20:01 IST | README request | This document — comprehensive project reference for future sessions |
 | 2026-05-01 00:28 IST | Firmware Upgrade | Requested full 18-servo 180° IK firmware + Phone Control |
+| 2026-05-28 18:46 IST | 180° Servos & Weight Calibration | Confirmed they are using 180° servos now. Reported that they calibrated after attaching, but under the robot's weight the legs sag (go down), losing calibration. Asked how to resolve. |
+| 2026-08-22 19:41 IST | L-Series Motor Testing | Requested dedicated firmware to test and run only the L-series (Coxa/Hip) motors L1 to L6 across both PCA9685 boards (0x40 & 0x41). |
+| 2026-08-22 19:59 IST | Single Board L-Series Wiring | Configured all L-series servos (L1 to L6) onto Board 1 (0x40) channels 0 to 5 for single PCA9685 testing. |
+| 2026-08-22 20:14 IST | L-Series Upload & Operation | Firmware uploaded successfully to ESP32. User guided on serial/Bluetooth operation commands. |
+| 2026-08-22 20:17 IST | I2C Troubleshooting | Serial Monitor showed PCA9685 0x40 not detected over I2C (SDA=21, SCL=22). Provided wiring diagnostics (VCC, GND, SDA/SCL pin swap). |
+| 2026-08-22 20:19 IST | PCA9685 Soldering & I2C Clarification | Clarified that no address pad soldering is needed for Board 1 (default 0x40); confirmed SDA=GPIO21 and SCL=GPIO22. |
+| 2026-09-04 13:11 IST | Single-Leg (L, M, D) Control | User connected single 3-DOF leg: L in Ch 1, M in Ch 2, D in Ch 3 on PCA9685 (0x40). Flashed dedicated firmware with manual angles, stand pose, and walking step-cycle gait. |
+| 2026-09-04 13:17 IST | Single-Leg Dance Routine | Choreographed dynamic 4-phase rhythm dance (Hip Sway & Knee Bounce, Rapid Toe Tap, Can-Can High Kick, Snake Body Wave) with auto-start on boot. |
+| 2026-09-04 13:27 IST | Exact Channel Map Confirmed | Clarified and confirmed exact 0-indexed PCA9685 pinout: L = Channel 0, M = Channel 1, D = Channel 2. Recompiled and validated. |
+| 2026-09-04 13:46 IST | Single-Leg Dance Confirmed Working | User confirmed all 3 joints (L, M, D) are dancing and moving in full synchronization. Phase 2 single-leg kinematics baseline successfully verified. |
+| 2026-09-04 15:49 IST | Servo 90° Horn Alignment | User reported horn attachment was not set precisely at 90°. Outlined hardware re-seating method and provided software trim offset calibration. |
+| 2026-09-04 15:55 IST | 300W 20A Buck Converter Setup | User acquired 300W 20A step-down buck module. Provided exact CV (6.0V) and CC (max headroom) potentiometer tuning instructions. |
+| 2026-09-04 16:10 IST | Resistance & CC/CV Verification | Clarified multimeter measurement rules (never measure resistance on live board; verify CV via DC volts and CC via slip-clutch click / load testing). |
+| 2026-09-04 16:14 IST | Potentiometer Model Confirmed | User confirmed trimpots are W503 (50kΩ, 25-turn precision 3296W potentiometers). Explained resistance decoding and adjustment mechanics. |
+| 2026-09-08 20:44 IST | Full 18-Servo Channel Map Confirmed | User provided handwritten diagram confirming new dual-board wiring: 0x40(Main)=Legs 6,5,4 and 0x41(Aux)=Legs 1,2,3 with D,M,L order per leg group. Firmware rewritten from single-leg test to full 18-servo dual-PCA9685 controller with tripod gait walk, dance, wave, sweep, per-joint serial/BT commands, TRIM calibration, RELAX, SCAN diagnostics. Boot centers all servos to 90°. |
+| 2026-09-08 21:15 IST | Robot Kinematic Geometry & Leg Direction Diagrams | User provided top & side diagram sketches specifying the physical orientation of all 6 legs around hexagonal chassis and 3-DOF joint motion axes (L = horizontal Coxa yaw swing, M = vertical Femur pitch lift, D = vertical Tibia pitch extension). Left vs right leg mirroring confirmed. Added software direction inversion (`INV` command) to `main.cpp` for instant per-joint direction flipping without reflashing. Verified zero-error compilation with PlatformIO. |
+| 2026-09-09 19:30 IST | Set All Legs to 75° (Calibration/Alignment) | User requested moving all legs to 75°. Live command `ALL 75` moves all 18 servos across all 6 legs on dual PCA9685 boards to 75.0° holding pose via USB Serial or Bluetooth. Also documented `SET 75 75 75` for per-joint triplet control. |
+| 2026-09-09 19:38 IST | Swapped PCA Board IDs | User requested swapping PCA board IDs. Tested assigning Board 0x40 to Right legs and Board 0x41 to Left legs. |
+| 2026-09-11 12:58 IST | Swapped PCA Bus IDs | User requested swapping PCA bus IDs. Assigned Board 0x40 (Main) to Left legs (Legs 4, 5, 6) and Board 0x41 (Aux) to Right legs (Legs 1, 2, 3) to match hardware connection state. |
+| 2026-09-11 13:04 IST | Swapped PCA Board Mapping (0x40 Right, 0x41 Left) | User requested swapping back again after hardware test. Board 0x40 (Main) is assigned to Right legs (Legs 1, 2, 3) and Board 0x41 (Aux) to Left legs (Legs 4, 5, 6). |
+| 2026-09-11 13:13 IST | Servo Pulse Driver Fix & All-Channel Broadcast | User reported servos not moving to 90°. Replaced vulnerable `writeMicroseconds()` (which performed unreliable I2C prescale reads that could shut off PWM) with direct, deterministic `setPWM()` 12-bit tick calculations (307 ticks = 1500µs = 90°). Added broadcast of 90° center pulse to channels 0–15 on boot and in `ALL` command. Lowered I2C clock to 100kHz for maximum noise immunity. Verified build. |
+| 2026-09-11 13:18 IST | Hardware & Power Diagnostics for Servos | Troubleshooting zero servo response: verified software is transmitting 307 ticks (1500µs) on channels 0-15; guided user to check V+ screw terminal power, green LED on PCA9685, servo connector polarity (signal vs GND), and second board connection. |
+| 2026-09-11 13:21 IST | Swapped PCA IDs & Restored 400kHz I2C | User requested swapping PCA IDs. Assigned Board 0x40 to Left (Legs 4, 5, 6) and Board 0x41 to Right (Legs 1, 2, 3). Restored 400kHz I2C clock. |
+| 2026-09-11 13:34 IST | Swapped PCA Board IDs (0x40 Right, 0x41 Left) | User requested swapping PCA IDs. Swapped assignments in firmware: Board 0x40 (Main) assigned to Right side (Legs 1, 2, 3) and Board 0x41 (Aux) assigned to Left side (Legs 4, 5, 6). Verified compilation cleanly passes with PlatformIO. |
+| 2026-09-12 19:22 IST | PCA9685 0x41 Hardware Address Setup | User asked how to set the second PCA9685 board to address 0x41. Explained A0 solder bridge location, binary offset formula (0x40 + 1), step-by-step soldering instructions, daisy-chain I2C bus wiring (SDA, SCL, VCC, GND), and V+ power routing. |
+| 2026-09-12 19:25 IST | Second PCA9685 Board Already Soldered | User confirmed that one PCA9685 board already has its address jumper soldered. That soldered board is configured as 0x41 (Left Side: Legs 4, 5, 6), while the unsoldered board is 0x40 (Right Side: Legs 1, 2, 3). Guided user on connecting the daisy-chain jumpers to test detection. |
+| 2026-09-12 19:26 IST | Address Pad Status on All PCA Boards | User noted that of the 6 pads, 1 pad appears soldered on all PCA boards. Outlined how to verify actual I2C address via single-board SCAN, how HASL solder coating differs from a bridge, and how to bridge A1 (+2) for address 0x43 or 0x42 if both boards share the same base address. |
+| 2026-09-12 19:33 IST | Live I2C Scan Diagnostic (0x40 Only) | User executed SCAN in serial monitor; only 0x40 was found. Corrected display tags in scanI2C() (0x40 Right, 0x41 Left). Outlined 3-step diagnostic to test Board 2 independently to verify if it is unpowered, miswired, or also on 0x40. |
+| 2026-09-12 19:36 IST | I2C Full-Range Bus Scan Clarification | User asked whether SCAN checks for specific IDs or all IDs. Confirmed scanI2C() tests all 112 valid 7-bit addresses (0x08 through 0x77); finding only 0x40 confirms no other device responded anywhere on the bus. |
+| 2026-09-12 19:42 IST | Hardware Address Confirmed: Board 2 is 0x43 | Live I2C scan confirmed Board 2 responds at address 0x43 (A0 + A1 bridged: 0x40 + 1 + 2 = 0x43) along with 0x70 (PCA9685 All-Call broadcast). Firmware updated with PCA_AUX_ADDR=0x43 (Left Side: Legs 4, 5, 6) and PCA_MAIN_ADDR=0x40 (Right Side: Legs 1, 2, 3). Recompiled cleanly. |
+| 2026-09-12 20:08 IST | Dual-Board Bus Drop Troubleshooting | User reported that each board responds individually (0x40 and 0x43), but when connecting both, only one responds (or vice-versa). Diagnosed header pinout traps (OE pin offset between GND and SCL), star-wiring method, and shared ground requirements. |
+| 2026-09-12 20:09 IST | Daisy-Chain Pass-Through Diagnosis | Identified that whichever board is connected directly to the ESP32 is detected (0x40 or 0x43), while the daisy-chained second board is unpowered due to the OE pin offset on the 6-pin header. Instructed user to connect both boards directly to the ESP32 in parallel. |
+| 2026-09-12 20:20 IST | Both PCA9685 Boards Simultaneously Online | User verified both boards detected simultaneously: Board 1 at 0x40 (Right: Legs 1-3) and Board 2 at 0x43 (Left: Legs 4-6). Also detected Sub-Call addresses (0x71, 0x72, 0x74) and All-Call (0x70). Dual-PCA9685 hardware I2C bus successfully verified. |
 
 ---
 
@@ -412,7 +501,7 @@ These decisions are FINAL. Do NOT change them or suggest alternatives unless the
 | Decision | Value | Status |
 |----------|-------|--------|
 | MCU | ESP32 30-pin DevKit (on expansion board) | ✅ Confirmed |
-| Servo drivers | 2× PCA9685 (0x40 Right, 0x41 Left) | ✅ Confirmed |
+| Servo drivers | 2× PCA9685 (0x40 Right Legs 1,2,3; 0x43 Left Legs 4,5,6) | ✅ Confirmed (Updated 2026-09-12 19:42) |
 | Servos (target) | 18× MG996R (180°), 3 DOF × 6 legs | ✅ Confirmed |
 | Robot type | Hexapod (6 legs) | ✅ Confirmed |
 | Battery | Bonka 3S 11.1V 2200mAh 35C LiPo | ✅ Confirmed |
@@ -423,12 +512,16 @@ These decisions are FINAL. Do NOT change them or suggest alternatives unless the
 | I²C pins | SDA = GPIO 21, SCL = GPIO 22 | ✅ Confirmed |
 | Upload speed | 115200 baud | ✅ Confirmed |
 | Serial monitor | 115200 baud | ✅ Confirmed |
+| Channel order per leg | D, M, L (Tibia first, Coxa last) | ✅ Confirmed (2026-09-08) |
+| Board 0x40 legs | Legs 1, 2, 3 (Right Side) | ✅ Confirmed (Updated 2026-09-12 19:42) |
+| Board 0x43 legs | Legs 4, 5, 6 (Left Side) | ✅ Confirmed (Updated 2026-09-12 19:42) |
+| Joint kinematic axes | L (Coxa Yaw swing), M (Femur Pitch lift), D (Tibia Pitch extend) | ✅ Confirmed (2026-09-08) |
 
 ### Rule 5 — Follow the Established Code Conventions
 - **Language:** C++ with Arduino framework on PlatformIO.
-- **Project root:** `e:\hexa\`
-- **Source code:** `e:\hexa\src\main.cpp`
-- **Config:** `e:\hexa\platformio.ini`
+- **Project root:** `d:\hexa\`
+- **Source code:** `d:\hexa\src\main.cpp`
+- **Config:** `d:\hexa\platformio.ini`
 - **Library:** Adafruit PWM Servo Driver Library (via PlatformIO lib_deps).
 - **All servo control** goes through PCA9685 `writeMicroseconds()` — never use direct GPIO PWM.
 - **I²C bus** initialized with `Wire.begin(21, 22)` at 400kHz.
@@ -438,10 +531,9 @@ These decisions are FINAL. Do NOT change them or suggest alternatives unless the
 ### Rule 6 — Current Hardware State (Update This When Things Change)
 | Item | Count | Type | Status |
 |------|-------|------|--------|
-| PCA9685 boards | 1 connected (0x40) | 16-channel servo driver | ✅ Working |
-| PCA9685 boards | 1 available (needs A0 bridge for 0x41) | 16-channel servo driver | ⏳ Not yet wired |
-| Servos connected | 3 | 360° continuous rotation | ✅ Working (need stop-point calibration) |
-| MG996R 180° servos | 0 | Standard position servos | 📦 Not yet received |
+| PCA9685 boards | 2 connected (0x40 & 0x43) | 16-channel servo driver | ✅ Both online & fully operational |
+| Servos connected | 18 | 180° standard positional (MG996R) | ✅ Working (experiencing leg sag under load) |
+| MG996R 180° servos | 18 | Standard position servos | ✅ Received and installed |
 | ESP32 | 1 | 30-pin DevKit on expansion board | ✅ Working on COM4 |
 | ZX-052 Buck | 1 | Set to 6.0V | ✅ Working |
 | 3S LiPo Battery | 1 | Bonka 2200mAh 35C | ✅ Working |
@@ -478,8 +570,8 @@ When the user tells you something new about the project (new parts, test results
 Copy and paste this into any new AI chat to provide full context:
 
 > **Project:** ESP32 Hexapod Spider Robot  
-> **Repo:** `e:\hexa` (PlatformIO project)  
-> **README:** `e:\hexa\README.md` — contains full project history, BOM, wiring, build phases, AND rules for the AI to follow.  
-> **Current phase:** Phase 2 — 3× 360° servos on PCA9685 (0x40), calibrating stop-points.  
-> **Next milestone:** Receive 180° MG996R servos → flash full IK firmware.  
-> **⚠️ Read the ENTIRE README first — especially the "Rules for AI Assistant" section — before writing any code or making changes.**
+> **Repo:** `d:\hexa` (PlatformIO project)  
+> **README:** `d:\hexa\rule_book_dk.md` — contains full project history, BOM, wiring, build phases, AND rules for the AI to follow.  
+> **Current phase:** Phase 3 — Full 18-servo dual-PCA9685 controller (0x40 Left, 0x41 Right) with direction inversion (INV), trim calibration, gait choreography, and live board swap (SWAP).  
+> **Next milestone:** Calibration and gait tuning with all 18 servos mounted.  
+> **⚠️ Read the ENTIRE rule_book_dk.md first — especially the "Rules for AI Assistant" section — before writing any code or making changes.**
