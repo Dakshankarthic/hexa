@@ -2,8 +2,8 @@
 
 > **Project Owner:** Dakshan  
 > **Start Date:** April 2026  
-> **Last Updated:** 2026-09-24 21:56 IST  
-> **Previous Updates:** 2026-09-13 00:24 IST | 2026-09-12 23:33 IST | 2026-09-12 20:20 IST | 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
+> **Last Updated:** 2026-09-24 22:54 IST  
+> **Previous Updates:** 2026-09-24 22:04 IST | 2026-09-24 22:02 IST | 2026-09-24 21:56 IST | 2026-09-13 00:24 IST | 2026-09-12 23:33 IST | 2026-09-12 20:20 IST | 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
 > **Phase 2 Status:** Finished on 2026-09-04 — Single-Leg Subassembly Testing Verified (L=Ch0, M=Ch1, D=Ch2 fully coordinated & dancing)
 > **Current Status:** Phase 3 — Full 18-servo dual-PCA9685 controller (0x40 Right, 0x43 Left) with direction inversion (INV), trim calibration, gait choreography, and live SWAP command.
 
@@ -343,6 +343,8 @@ pio device monitor
 - [x] Serial command interface for speed control and calibration
 - [x] PlatformIO project compiles and uploads successfully
 - [x] Single 3-DOF leg (L=Ch0, M=Ch1, D=Ch2) verified with coordinated dance & step motion
+- [x] Dual PCA9685 boards detected simultaneously on I²C (0x40 Right, 0x43 Left)
+- [x] All 18 servos mounted and wired to dual PCA9685 boards
 - [x] ZX-052 buck converter providing 6V to servo V+
 
 ### What's Next 🔜
@@ -351,12 +353,12 @@ pio device monitor
 - [x] Receive 180° MG996R servos → replace 360° servos
 - [x] Flash full 18-servo firmware with IK + tripod gait
 - [x] Wi-Fi/BLE remote control integration
-- [ ] Bridge A0 pad on second PCA9685 board (set to 0x41)
+- [x] Configure second PCA9685 board (A0+A1 bridged to 0x43, fully detected)
 - [ ] 3D print first leg → Phase 2 mechanical assembly
 - [ ] Print full chassis → Phase 3
 - [ ] Suspended gait testing → Phase 4
 - [ ] Ground walking + thermal monitoring → Phase 5
-- [ ] Wi-Fi/BLE remote control integration
+- [ ] Dual-SMPS wiring / bundled power feeds to eliminate standing inrush stall
 
 ---
 
@@ -372,6 +374,8 @@ pio device monitor
 | 6 | Is ZX-052 strong enough for 18 servos? | Likely yes (15-20A class); split to 2 bucks if overheats | ⏳ Test under load |
 | 7 | PlatformIO upload "Write timeout" | Hold BOOT button on ESP32; use data cable; lower upload_speed to 115200 | ✅ Resolved |
 | 8 | 360° servos creep at 1500us | Use `T` command to find exact stop-point per servo | ⏳ Calibrating |
+| 9 | Single SMPS needs manual hand push to lift robot to stand | (1) Simultaneous 18-servo stall inrush (>30A) sags voltage; (2) Thin wire gauge drops voltage; (3) 5V delivers less torque than 6V. Solution: Split to two SMPS supplies (isolated +5V rails, common GND), bundle multiple wires per terminal, and add soft-start current ramping in firmware | ✅ Solution Documented |
+| 10 | Connecting second PCA9685 made one board disappear on I²C | 6-pin side header pin 2 is OE (Output Enable), not SCL! Daisy-chaining with a 4-pin sequential jumper shorted SCL to OE and left VCC unpowered. Solution: Skip OE and V+ pins; wire only GND (1), SCL (3), SDA (4), VCC (5) | ✅ Resolved |
 
 ---
 
@@ -475,6 +479,8 @@ All information provided by the project owner, timestamped for reference.
 | 2026-09-13 00:05 IST | Communication Protocols Review | Documented all protocols used: I²C (400 kHz, GPIO 21/22) for PCA9685 servo drivers, PWM (50 Hz, 500–2500 µs) for MG996R servos, Bluetooth Classic SPP ("HEXA-SPIDER") for phone control, and UART (115200 baud) for USB Serial debug. Discussed Bluetooth latency (~20–100 ms) vs alternatives: ESP-NOW (~1–5 ms, native), BLE (~7.5–15 ms, native), WiFi UDP (~5–10 ms, native). Zigbee not viable on ESP32 DevKit (needs ESP32-C6/H2). |
 | 2026-09-13 00:24 IST | 90° Center Pose Diagram Created | Generated accurate technical diagram showing hexapod with all 18 servos at 90° center position. Includes both TOP VIEW (hexagonal body, 6 legs radiating perpendicular) and SIDE VIEW (single leg showing Coxa→Femur→Tibia all perfectly horizontal in one straight line). At 90° center the robot cannot stand — legs stick straight out flat. Diagram saved to `docs/hexapod_90deg_center_pose.jpg`. Compare with STAND pose (L=90, M=60, D=120) which angles legs down to support weight. |
 | 2026-09-24 21:56 IST | Reviewed Remote Git Updates & Embedded Diagram | Reviewed user commit 1a3e0d3 adding technical 90° center pose diagram (docs/hexapod_90deg_center_pose.jpg) and communication protocols documentation. Embedded the 90° pose diagram into the Physical Kinematics section of rule_book_dk.md. |
+| 2026-09-24 22:02 IST | Computer SMPS 5V Power Supply Evaluation | Evaluated using ATX computer SMPS 5V rails for stationary hexapod testing. Confirmed 5V direct to PCA9685 V+ is excellent (15-30A headroom). Documented critical safety rules: (1) Never tie two +5V outputs together; (2) Common GND must tie both SMPS GNDs to ESP32 GND; (3) Green PS_ON to Black GND to activate; (4) Logic VCC stays on ESP32 3.3V. |
+| 2026-09-24 22:04 IST | Single SMPS Inrush & Standing Stall Diagnosis | User reported single SMPS struggles to lift robot from flat to stand pose without manual hand assist. Diagnosed: (1) 18-servo simultaneous stall inrush (25-40A) causing +5V rail sag; (2) Single-wire gauge bottleneck (need 3-4 bundled red/black wires); (3) 5V torque lower than 6V; (4) Instantaneous stand step firing all 18 motors at once. Confirmed splitting to TWO SMPS supplies directly fixes this, and outlined soft-start ramping. |
 
 ---
 
