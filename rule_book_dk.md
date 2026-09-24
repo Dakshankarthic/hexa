@@ -2,8 +2,8 @@
 
 > **Project Owner:** Dakshan  
 > **Start Date:** April 2026  
-> **Last Updated:** 2026-09-13 00:24 IST  
-> **Previous Updates:** 2026-09-12 23:33 IST | 2026-09-12 20:20 IST | 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
+> **Last Updated:** 2026-09-24 21:56 IST  
+> **Previous Updates:** 2026-09-13 00:24 IST | 2026-09-12 23:33 IST | 2026-09-12 20:20 IST | 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
 > **Phase 2 Status:** Finished on 2026-09-04 — Single-Leg Subassembly Testing Verified (L=Ch0, M=Ch1, D=Ch2 fully coordinated & dancing)
 > **Current Status:** Phase 3 — Full 18-servo dual-PCA9685 controller (0x40 Right, 0x43 Left) with direction inversion (INV), trim calibration, gait choreography, and live SWAP command.
 
@@ -184,6 +184,8 @@ Bonka 3S LiPo (11.1V)
 | ch 8 | L4 (Coxa) | Leg 4 — Front Left |
 
 ### Physical Kinematics & Leg Layout (Confirmed 2026-09-08)
+
+![Hexapod 90° Center Pose Diagram](docs/hexapod_90deg_center_pose.jpg)
 
 #### Top View — Leg Layout & Gait Direction
 
@@ -472,6 +474,7 @@ All information provided by the project owner, timestamped for reference.
 | 2026-09-12 23:33 IST | Pushed to GitHub Repository | Committed and pushed changes to origin/main (commit 446deac): dual-PCA9685 controller (0x40 Right, 0x43 Left), direct PWM ticks, updated rule book, and Android bluetooth gamepad controller app. Working tree clean. |
 | 2026-09-13 00:05 IST | Communication Protocols Review | Documented all protocols used: I²C (400 kHz, GPIO 21/22) for PCA9685 servo drivers, PWM (50 Hz, 500–2500 µs) for MG996R servos, Bluetooth Classic SPP ("HEXA-SPIDER") for phone control, and UART (115200 baud) for USB Serial debug. Discussed Bluetooth latency (~20–100 ms) vs alternatives: ESP-NOW (~1–5 ms, native), BLE (~7.5–15 ms, native), WiFi UDP (~5–10 ms, native). Zigbee not viable on ESP32 DevKit (needs ESP32-C6/H2). |
 | 2026-09-13 00:24 IST | 90° Center Pose Diagram Created | Generated accurate technical diagram showing hexapod with all 18 servos at 90° center position. Includes both TOP VIEW (hexagonal body, 6 legs radiating perpendicular) and SIDE VIEW (single leg showing Coxa→Femur→Tibia all perfectly horizontal in one straight line). At 90° center the robot cannot stand — legs stick straight out flat. Diagram saved to `docs/hexapod_90deg_center_pose.jpg`. Compare with STAND pose (L=90, M=60, D=120) which angles legs down to support weight. |
+| 2026-09-24 21:56 IST | Reviewed Remote Git Updates & Embedded Diagram | Reviewed user commit 1a3e0d3 adding technical 90° center pose diagram (docs/hexapod_90deg_center_pose.jpg) and communication protocols documentation. Embedded the 90° pose diagram into the Physical Kinematics section of rule_book_dk.md. |
 
 ---
 
