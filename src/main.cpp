@@ -94,19 +94,48 @@ Leg legs[NUM_LEGS];
 // ---------------------------------------------------------------------------
 // Motion Modes
 // ---------------------------------------------------------------------------
-enum Mode { MODE_HOLD, MODE_WALK, MODE_DANCE, MODE_WAVE, MODE_SWEEP };
+enum Mode {
+  MODE_HOLD,
+  MODE_STANDUP,      // Soft stand sequence: D -> 5 (tuck) then ramp D -> 175
+  MODE_RIPPLE,       // Ultra-stable 4-leg grounded gait (default walk)
+  MODE_TRIPOD,       // 3-leg tripod gait
+  MODE_DANCE,
+  MODE_WAVE,
+  MODE_SWEEP
+};
 Mode mode = MODE_HOLD;
+int  walkDir = 1;      // +1 = Fwd, -1 = Bwd, +2 = Turn Left, -2 = Turn Right
 unsigned long lastTickMs = 0;
 
-// Walk tuning parameters
-uint32_t walkPeriod = 2000;         // Full gait cycle duration (ms)
-float    walkSwing  = 25.0f;        // Coxa swing range (degrees from center)
-float    walkLift   = 30.0f;        // Femur lift height (degrees)
+// Stand pose (confirmed 2026-10-04) + stand-up sequence
+const float STAND_L = 90.0f;
+const float STAND_M = 90.0f;
+const float STAND_D = 175.0f;
+const float TUCK_D  = 5.0f;         // Fold tibia fully first (user's working stand program)
+uint32_t tuckMs  = 800;             // Time to fold D -> 5
+uint32_t riseMs  = 2000;            // Time to push D 5 -> 175 (soft, limits current surge)
+bool     isStanding = false;
+unsigned long standStartMs = 0;
+float    standFromD = 90.0f;
+Mode     pendingMode = MODE_HOLD;   // Gait to start automatically after stand-up
+int      pendingDir  = 1;
+unsigned long walkStartMs = 0;      // Gait start time (phase 0 + blend-in)
+
+// Gait tuning parameters
+uint32_t ripplePeriod = 2400;       // Full Ripple cycle duration (ms) -> 800ms per pair
+uint32_t tripodPeriod = 2000;       // Full Tripod cycle duration (ms)
+float    walkSwing    = 18.0f;      // Coxa swing range (degrees from center)
+float    walkLift     = 0.0f;       // Femur lift (deg). 0 = off: M direction per side not yet verified
+float    dTuck        = 35.0f;      // Tibia tuck during swing (deg). Lower D = foot up (5 = fully tucked)
 
 // Sweep state
 float sweepPos = 90.0f;
 float sweepDir = 1.0f;
 float sweepRate = 60.0f;            // degrees per second
+
+// Non-blocking serial buffers
+String serialBuf = "";
+String btBuf     = "";
 
 // ---------------------------------------------------------------------------
 // Forward Declarations
@@ -120,9 +149,16 @@ void writeJoint(Joint& j, float targetDeg);
 void setLeg(int idx, float lDeg, float mDeg, float dDeg);
 void centerAll();
 void standAll();
+void sitDown();
 void relaxAll();
+void handleSerialInput();
+void handleBTInput();
 void updateMotion();
-void updateWalk(unsigned long now);
+void beginStandup(Mode after, int dir);
+void startWalk(Mode m, int dir);
+void updateStandup(unsigned long now);
+void updateRipple(unsigned long now, int dir);
+void updateTripod(unsigned long now, int dir);
 void updateDance(unsigned long now);
 void updateWave(unsigned long now);
 void updateSweep(float dt);
@@ -196,22 +232,54 @@ void setup() {
 }
 
 // ===========================================================================
+//  NON-BLOCKING INPUT HANDLERS
+// ===========================================================================
+void handleSerialInput() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      serialBuf.trim();
+      if (serialBuf.length() > 0) {
+        processCmd(serialBuf);
+        serialBuf = "";
+      }
+    } else {
+      serialBuf += c;
+    }
+  }
+}
+
+void handleBTInput() {
+  while (SerialBT.available()) {
+    char c = (char)SerialBT.read();
+    if (c == '\n' || c == '\r') {
+      btBuf.trim();
+      if (btBuf.length() > 0) {
+        processCmd(btBuf);
+        btBuf = "";
+      }
+    } else {
+      btBuf += c;
+      // Immediate single-character dispatch for App buttons: F, B, L, R, X, U, D
+      if (btBuf.length() == 1) {
+        char u = toupper(btBuf[0]);
+        if (u == 'F' || u == 'B' || u == 'L' || u == 'R' ||
+            u == 'X' || u == 'U' || u == 'D') {
+          processCmd(btBuf);
+          btBuf = "";
+        }
+      }
+    }
+  }
+}
+
+// ===========================================================================
 //  MAIN LOOP  (non-blocking)
 // ===========================================================================
 void loop() {
-  // USB Serial commands
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    if (cmd.length() > 0) processCmd(cmd);
-  }
-
-  // Bluetooth commands
-  if (SerialBT.available()) {
-    String cmd = SerialBT.readStringUntil('\n');
-    cmd.trim();
-    if (cmd.length() > 0) processCmd(cmd);
-  }
+  // Non-blocking USB Serial & Bluetooth polling
+  handleSerialInput();
+  handleBTInput();
 
   // Continuous motion update (50 Hz, non-blocking)
   updateMotion();
@@ -241,19 +309,19 @@ void initLegs() {
   legs[0].num = 1;  legs[0].name = "Front Right";  legs[0].leftSide = false;
   initJoint(legs[0].L, &pcaMain, 2,  30.0f, 150.0f);   // Coxa
   initJoint(legs[0].M, &pcaMain, 1,  20.0f, 160.0f);   // Femur
-  initJoint(legs[0].D, &pcaMain, 0,  20.0f, 160.0f);   // Tibia
+  initJoint(legs[0].D, &pcaMain, 0,   0.0f, 180.0f);   // Tibia (needs 5..175 for stand-up)
 
   // Leg 2 — Mid Right:    D2=ch3, M2=ch4, L2=ch5
   legs[1].num = 2;  legs[1].name = "Mid Right";    legs[1].leftSide = false;
   initJoint(legs[1].L, &pcaMain, 5,  30.0f, 150.0f);
   initJoint(legs[1].M, &pcaMain, 4,  20.0f, 160.0f);
-  initJoint(legs[1].D, &pcaMain, 3,  20.0f, 160.0f);
+  initJoint(legs[1].D, &pcaMain, 3,   0.0f, 180.0f);
 
   // Leg 3 — Rear Right:   D3=ch6, M3=ch7, L3=ch8
   legs[2].num = 3;  legs[2].name = "Rear Right";   legs[2].leftSide = false;
   initJoint(legs[2].L, &pcaMain, 8,  30.0f, 150.0f);
   initJoint(legs[2].M, &pcaMain, 7,  20.0f, 160.0f);
-  initJoint(legs[2].D, &pcaMain, 6,  20.0f, 160.0f);
+  initJoint(legs[2].D, &pcaMain, 6,   0.0f, 180.0f);
 
   // ===== Board 0x43 (Aux) — LEFT SIDE: Legs 4, 5, 6 =====
 
@@ -261,19 +329,19 @@ void initLegs() {
   legs[3].num = 4;  legs[3].name = "Front Left";   legs[3].leftSide = true;
   initJoint(legs[3].L, &pcaAux, 8,  30.0f, 150.0f);
   initJoint(legs[3].M, &pcaAux, 7,  20.0f, 160.0f);
-  initJoint(legs[3].D, &pcaAux, 6,  20.0f, 160.0f);
+  initJoint(legs[3].D, &pcaAux, 6,   0.0f, 180.0f);
 
   // Leg 5 — Mid Left:     D5=ch3, M5=ch4, L5=ch5
   legs[4].num = 5;  legs[4].name = "Mid Left";     legs[4].leftSide = true;
   initJoint(legs[4].L, &pcaAux, 5,  30.0f, 150.0f);
   initJoint(legs[4].M, &pcaAux, 4,  20.0f, 160.0f);
-  initJoint(legs[4].D, &pcaAux, 3,  20.0f, 160.0f);
+  initJoint(legs[4].D, &pcaAux, 3,   0.0f, 180.0f);
 
   // Leg 6 — Rear Left:    D6=ch0, M6=ch1, L6=ch2
   legs[5].num = 6;  legs[5].name = "Rear Left";    legs[5].leftSide = true;
   initJoint(legs[5].L, &pcaAux, 2,  30.0f, 150.0f);
   initJoint(legs[5].M, &pcaAux, 1,  20.0f, 160.0f);
-  initJoint(legs[5].D, &pcaAux, 0,  20.0f, 160.0f);
+  initJoint(legs[5].D, &pcaAux, 0,   0.0f, 180.0f);
 }
 
 // ===========================================================================
@@ -316,18 +384,75 @@ void setLeg(int idx, float lDeg, float mDeg, float dDeg) {
 // Center all 18 servos to 90°
 void centerAll() {
   mode = MODE_HOLD;
+  isStanding = false;
   for (int i = 0; i < NUM_LEGS; i++) setLeg(i, 90.0f, 90.0f, 90.0f);
 }
 
-// Stand pose: legs angled down for support
+// Stand pose (instant): legs angled down for support (confirmed working 2026-10-04)
 void standAll() {
   mode = MODE_HOLD;
-  for (int i = 0; i < NUM_LEGS; i++) setLeg(i, 90.0f, 60.0f, 120.0f);
+  for (int i = 0; i < NUM_LEGS; i++) setLeg(i, STAND_L, STAND_M, STAND_D);
+}
+
+// Sit pose: lower body toward ground (resting pose)
+void sitDown() {
+  mode = MODE_HOLD;
+  isStanding = false;
+  for (int i = 0; i < NUM_LEGS; i++) setLeg(i, 90.0f, 90.0f, 90.0f);
+}
+
+// Start the soft stand-up sequence; optionally start a gait when finished
+void beginStandup(Mode after, int dir) {
+  pendingMode  = after;
+  pendingDir   = dir;
+  standFromD   = legs[0].D.target;
+  standStartMs = millis();
+  mode = MODE_STANDUP;
+}
+
+// WALK entry point: stands up first if needed, then starts gait with blend-in
+void startWalk(Mode m, int dir) {
+  if (!isStanding) {
+    beginStandup(m, dir);
+    Serial.println(F("[AUTO] Not standing -> stand-up sequence first, then walk"));
+    return;
+  }
+  if (mode != m || walkDir != dir) walkStartMs = millis();
+  walkDir = dir;
+  mode = m;
+}
+
+// D: current -> 5 (tuck), then smooth ramp 5 -> 175. L and M held at 90.
+void updateStandup(unsigned long now) {
+  unsigned long el = now - standStartMs;
+  float d;
+  if (el < tuckMs) {
+    float f = (float)el / (float)tuckMs;
+    d = standFromD + (TUCK_D - standFromD) * f;
+  } else if (el < tuckMs + riseMs) {
+    float f = (float)(el - tuckMs) / (float)riseMs;
+    f = f * f * (3.0f - 2.0f * f);                     // smoothstep: soft start & end
+    d = TUCK_D + (STAND_D - TUCK_D) * f;
+  } else {
+    standAll();
+    isStanding = true;
+    Serial.println(F("[OK] Standing (L=90 M=90 D=175)"));
+    if (pendingMode == MODE_RIPPLE || pendingMode == MODE_TRIPOD) {
+      walkStartMs = now;
+      walkDir = pendingDir;
+      mode = pendingMode;
+      Serial.println(F("[OK] Gait starting"));
+    }
+    pendingMode = MODE_HOLD;
+    return;
+  }
+  for (int i = 0; i < NUM_LEGS; i++) setLeg(i, STAND_L, STAND_M, d);
 }
 
 // Relax: disable PWM on all channels (servos go limp)
 void relaxAll() {
   mode = MODE_HOLD;
+  isStanding = false;
   for (int i = 0; i < NUM_LEGS; i++) {
     if (legs[i].L.active) legs[i].L.board->setPWM(legs[i].L.ch, 0, 4096);
     if (legs[i].M.active) legs[i].M.board->setPWM(legs[i].M.ch, 0, 4096);
@@ -345,28 +470,117 @@ void updateMotion() {
   lastTickMs = now;
 
   switch (mode) {
-    case MODE_HOLD:  break;                 // Nothing to do
-    case MODE_WALK:  updateWalk(now);  break;
-    case MODE_DANCE: updateDance(now); break;
-    case MODE_WAVE:  updateWave(now);  break;
-    case MODE_SWEEP: updateSweep(dt);  break;
+    case MODE_HOLD:   break;                 // Nothing to do
+    case MODE_STANDUP: updateStandup(now); break;
+    case MODE_RIPPLE: updateRipple(now, walkDir); break;
+    case MODE_TRIPOD: updateTripod(now, walkDir); break;
+    case MODE_DANCE:  updateDance(now); break;
+    case MODE_WAVE:   updateWave(now);  break;
+    case MODE_SWEEP:  updateSweep(dt);  break;
   }
 }
 
 // ===========================================================================
-//  TRIPOD GAIT WALK
-//  Groups: A = Legs 1,3,5 (indices 0,2,4)   B = Legs 2,4,6 (indices 1,3,5)
-//  Group A swings while B supports, then they switch.
+//  ULTRA-STABLE RIPPLE / TETRAPOD GAIT WALK
+//  At every millisecond: EXACTLY 4 LEGS ARE FIRMLY ON THE GROUND
+//  (2 legs on Right side, 2 legs on Left side).
+//  Only 2 diagonal legs lift at a time. The robot CANNOT tip over!
+//  Pairs:
+//    Pair 1: Leg 1 (Front Right) + Leg 6 (Rear Left)  -> Offset 0/3
+//    Pair 2: Leg 2 (Mid Right)   + Leg 5 (Mid Left)    -> Offset 1/3
+//    Pair 3: Leg 3 (Rear Right)  + Leg 4 (Front Left)  -> Offset 2/3
 // ===========================================================================
-void updateWalk(unsigned long now) {
-  float progress = (float)(now % walkPeriod) / (float)walkPeriod;   // 0.0 → 1.0
+void updateRipple(unsigned long now, int dir) {
+  unsigned long el = now - walkStartMs;
+  float progress = (float)(el % ripplePeriod) / (float)ripplePeriod;    // 0.0 → 1.0
+  float amp = fminf(1.0f, (float)el / (float)ripplePeriod);            // blend in over 1 cycle
+
+  static const float OFFSETS[NUM_LEGS] = {
+    0.0f,            // Leg 1 (Front Right, Pair 1)
+    1.0f / 3.0f,     // Leg 2 (Mid Right,   Pair 2)
+    2.0f / 3.0f,     // Leg 3 (Rear Right,  Pair 3)
+    2.0f / 3.0f,     // Leg 4 (Front Left,  Pair 3)
+    1.0f / 3.0f,     // Leg 5 (Mid Left,    Pair 2)
+    0.0f             // Leg 6 (Rear Left,   Pair 1)
+  };
+
+  for (int i = 0; i < NUM_LEGS; i++) {
+    float legPhase = fmodf(progress + OFFSETS[i], 1.0f);
+
+    // Direction multiplier per leg:
+    // dir: +1 = Forward, -1 = Backward, +2 = Turn Left, -2 = Turn Right
+    float legDir = 1.0f;
+    if (dir == -1) {
+      legDir = -1.0f;
+    } else if (dir == 2) {
+      // Turn Left: Right legs forward (+1), Left legs backward (-1)
+      legDir = legs[i].leftSide ? -1.0f : 1.0f;
+    } else if (dir == -2) {
+      // Turn Right: Right legs backward (-1), Left legs forward (+1)
+      legDir = legs[i].leftSide ? 1.0f : -1.0f;
+    }
+
+    // Left-side legs mirror the coxa swing direction
+    float cDir = legs[i].leftSide ? -1.0f : 1.0f;
+    float swingSign = cDir * legDir;
+
+    float lA, mA, dA;
+
+    if (legPhase < (1.0f / 3.0f)) {
+      // ---- Swing phase (leg in air, moving forward) ----
+      // Duration: 1/3 of cycle. 4 other legs are firmly on ground.
+      float s = legPhase * 3.0f;                        // 0.0 → 1.0
+      float lift = sinf(s * PI);                        // 0 → 1 → 0
+
+      // Coxa swings from -walkSwing to +walkSwing
+      float sw = -1.0f + 2.0f * s;                     // -1.0 → +1.0
+      lA = STAND_L + swingSign * (sw * walkSwing * amp);
+
+      // Lift by tucking the tibia (D down = foot up, direction proven by stand-up)
+      mA = STAND_M + walkLift * lift * amp;
+      dA = STAND_D - dTuck * lift * amp;
+    } else {
+      // ---- Stance phase (leg on ground, pushing body) ----
+      // Duration: 2/3 of cycle. Firmly planted, bearing weight.
+      float s = (legPhase - (1.0f / 3.0f)) * 1.5f;     // 0.0 → 1.0
+
+      // Coxa pushes back from +walkSwing to -walkSwing
+      float sw = 1.0f - 2.0f * s;                      // +1.0 → -1.0
+      lA = STAND_L + swingSign * (sw * walkSwing * amp);
+
+      mA = STAND_M;                                    // hold stance height
+      dA = STAND_D;                                    // hold planted
+    }
+
+    setLeg(i, lA, mA, dA);
+  }
+}
+
+// ===========================================================================
+//  TRIPOD GAIT WALK (3 Legs Lift, 3 Legs Support)
+//  Groups: A = Legs 1,3,5 (indices 0,2,4)   B = Legs 2,4,6 (indices 1,3,5)
+//  Tuned with moderate lift to minimize tipping on floor.
+// ===========================================================================
+void updateTripod(unsigned long now, int dir) {
+  unsigned long el = now - walkStartMs;
+  float progress = (float)(el % tripodPeriod) / (float)tripodPeriod;    // 0.0 → 1.0
+  float amp = fminf(1.0f, (float)el / (float)tripodPeriod);            // blend in over 1 cycle
 
   for (int i = 0; i < NUM_LEGS; i++) {
     // Even indices (0,2,4) = Group A,  Odd indices (1,3,5) = Group B
     float phase = (i % 2 == 0) ? progress : fmodf(progress + 0.5f, 1.0f);
 
-    // Left-side legs mirror the coxa swing direction
+    float legDir = 1.0f;
+    if (dir == -1) {
+      legDir = -1.0f;
+    } else if (dir == 2) {
+      legDir = legs[i].leftSide ? -1.0f : 1.0f;
+    } else if (dir == -2) {
+      legDir = legs[i].leftSide ? 1.0f : -1.0f;
+    }
+
     float cDir = legs[i].leftSide ? -1.0f : 1.0f;
+    float swingSign = cDir * legDir;
 
     float lA, mA, dA;
 
@@ -374,15 +588,15 @@ void updateWalk(unsigned long now) {
       // ---- Swing phase (leg in air, moving forward) ----
       float t    = phase / 0.5f;                        // 0 → 1
       float lift = sinf(t * PI);                        // arc 0→1→0
-      lA = 90.0f + cDir * (-walkSwing + 2.0f * walkSwing * t);
-      mA = 60.0f + walkLift * lift;                     // lift up
-      dA = 120.0f - 20.0f * lift;                       // tuck foot
+      lA = STAND_L + swingSign * (-walkSwing + 2.0f * walkSwing * t) * amp;
+      mA = STAND_M + walkLift * lift * amp;
+      dA = STAND_D - dTuck * lift * amp;               // tuck foot up
     } else {
       // ---- Stance phase (leg on ground, pushing back) ----
       float t = (phase - 0.5f) / 0.5f;                 // 0 → 1
-      lA = 90.0f + cDir * (walkSwing - 2.0f * walkSwing * t);
-      mA = 60.0f;                                      // hold down
-      dA = 120.0f;                                      // hold planted
+      lA = STAND_L + swingSign * (walkSwing - 2.0f * walkSwing * t) * amp;
+      mA = STAND_M;                                    // hold horizontal
+      dA = STAND_D;                                    // hold planted
     }
 
     setLeg(i, lA, mA, dA);
@@ -406,15 +620,15 @@ void updateDance(unsigned long now) {
     // --- Phase 1 (0–4s): Hip Sway & Knee Bounce ---
     if (cycle < 4000) {
       lA = 90.0f + cDir * sinf(t * PI) * 35.0f;
-      mA = 65.0f + fabsf(sinf(t * 2.0f * PI)) * 30.0f;
-      dA = 110.0f + sinf(t * 2.0f * PI) * 20.0f;
+      mA = 90.0f + fabsf(sinf(t * 2.0f * PI)) * 25.0f;
+      dA = 175.0f - fabsf(sinf(t * 2.0f * PI)) * 30.0f;
     }
     // --- Phase 2 (4–8s): Rapid Toe Tap ---
     else if (cycle < 8000) {
       float st = t - 4.0f;
       lA = 70.0f + cDir * (fmodf(fabsf(st), 4.0f) / 4.0f) * 40.0f;
-      mA = 80.0f + sinf(st * PI) * 10.0f;
-      dA = 95.0f + (sinf(st * 6.0f * PI) > 0.0f ? 35.0f : 0.0f);
+      mA = 90.0f + sinf(st * PI) * 10.0f;
+      dA = 175.0f - (sinf(st * 6.0f * PI) > 0.0f ? 40.0f : 0.0f);
     }
     // --- Phase 3 (8–12s): Can-Can High Kick ---
     else if (cycle < 12000) {
@@ -424,13 +638,13 @@ void updateDance(unsigned long now) {
       if (kickPh < 1.0f) {
         float kH = sinf(kickPh * PI);                   // kick arc
         lA = 90.0f + cDir * sinf(kickPh * 2.0f * PI) * 25.0f;
-        mA = 60.0f + kH * 55.0f;                        // thigh lifts
-        dA = 120.0f - kH * 60.0f;                       // shin extends
+        mA = 90.0f + kH * 45.0f;                        // thigh lifts
+        dA = 175.0f - kH * 80.0f;                       // shin extends up
       } else {
         float sp = kickPh - 1.0f;
         lA = 90.0f + cDir * sinf(sp * 4.0f * PI) * 20.0f;  // shimmy
-        mA = 50.0f;
-        dA = 135.0f;
+        mA = 85.0f;
+        dA = 175.0f;
       }
     }
     // --- Phase 4 (12–16s): Snake Body Wave ---
@@ -438,8 +652,8 @@ void updateDance(unsigned long now) {
       float st = t - 12.0f;
       float w  = st * 4.5f;
       lA = 90.0f + cDir * sinf(w) * 32.0f;
-      mA = 75.0f + sinf(w - 1.05f) * 28.0f;
-      dA = 105.0f + sinf(w - 2.10f) * 32.0f;
+      mA = 90.0f + sinf(w - 1.05f) * 20.0f;
+      dA = 175.0f - fabsf(sinf(w - 2.10f)) * 40.0f;
     }
 
     setLeg(i, lA, mA, dA);
@@ -459,8 +673,8 @@ void updateWave(unsigned long now) {
 
     float cDir = legs[i].leftSide ? -1.0f : 1.0f;
     float lA = 90.0f + cDir * sinf(phase * 2.0f * PI) * 20.0f;
-    float mA = 60.0f + lift * 35.0f;
-    float dA = 120.0f - lift * 25.0f;
+    float mA = 90.0f + lift * 30.0f;
+    float dA = 175.0f - lift * 40.0f;
 
     setLeg(i, lA, mA, dA);
   }
@@ -526,16 +740,47 @@ void processCmd(String cmd) {
     SerialBT.println(F("OK:CENTER"));
     return;
   }
-  if (cmd == "STAND") {
-    standAll();
-    Serial.println(F("[OK] Stand pose: L=90 M=60 D=120"));
+  if (cmd == "STAND" || cmd == "U") {
+    beginStandup(MODE_HOLD, 1);
+    Serial.println(F("[OK] Stand-up sequence started (D: 5 -> 175)"));
     SerialBT.println(F("OK:STAND"));
     return;
   }
-  if (cmd == "WALK" || cmd == "GAIT" || cmd == "STEP") {
-    mode = MODE_WALK;
-    Serial.println(F("[OK] Tripod gait walk active"));
+  if (cmd == "STANDNOW") {
+    standAll();
+    isStanding = true;
+    Serial.println(F("[OK] Instant stand pose (L=90 M=90 D=175)"));
+    SerialBT.println(F("OK:STANDNOW"));
+    return;
+  }
+  if (cmd == "WALK" || cmd == "GAIT" || cmd == "STEP" || cmd == "F") {
+    startWalk(MODE_RIPPLE, 1);
+    Serial.println(F("[OK] Ripple gait walk FORWARD (4 legs grounded)"));
     SerialBT.println(F("OK:WALK"));
+    return;
+  }
+  if (cmd == "B" || cmd == "BACK") {
+    startWalk(MODE_RIPPLE, -1);
+    Serial.println(F("[OK] Ripple gait walk BACKWARD"));
+    SerialBT.println(F("OK:BACK"));
+    return;
+  }
+  if (cmd == "L" || cmd == "LEFT") {
+    startWalk(MODE_RIPPLE, 2);
+    Serial.println(F("[OK] Ripple gait TURN LEFT"));
+    SerialBT.println(F("OK:LEFT"));
+    return;
+  }
+  if (cmd == "R" || cmd == "RIGHT") {
+    startWalk(MODE_RIPPLE, -2);
+    Serial.println(F("[OK] Ripple gait TURN RIGHT"));
+    SerialBT.println(F("OK:RIGHT"));
+    return;
+  }
+  if (cmd == "TRIPOD") {
+    startWalk(MODE_TRIPOD, 1);
+    Serial.println(F("[OK] Tripod gait walk active (3-leg swap)"));
+    SerialBT.println(F("OK:TRIPOD"));
     return;
   }
   if (cmd == "DANCE" || cmd == "PARTY") {
@@ -556,6 +801,12 @@ void processCmd(String cmd) {
     sweepDir = 1.0f;
     Serial.println(F("[OK] Sweep active (45-135 deg)"));
     SerialBT.println(F("OK:SWEEP"));
+    return;
+  }
+  if (cmd == "SIT" || cmd == "D") {
+    sitDown();
+    Serial.println(F("[OK] Sit pose: L=90 M=90 D=90"));
+    SerialBT.println(F("OK:SIT"));
     return;
   }
   if (cmd == "STOP" || cmd == "X") {
@@ -765,11 +1016,12 @@ void processCmd(String cmd) {
 
   // ======= Walk tuning: "WALKSPEED 1500" / "WALKSWING 30" / "WALKLIFT 40" =======
   if (cmd.startsWith("WALKSPEED ")) {
-    walkPeriod = (uint32_t)cmd.substring(10).toInt();
-    if (walkPeriod < 500)  walkPeriod = 500;
-    if (walkPeriod > 8000) walkPeriod = 8000;
-    Serial.printf("[OK] Walk period = %lu ms\n", walkPeriod);
-    SerialBT.printf("OK:WALKSPEED=%lu\n", walkPeriod);
+    uint32_t val = (uint32_t)cmd.substring(10).toInt();
+    val = constrain(val, (uint32_t)500, (uint32_t)8000);
+    ripplePeriod = val;
+    tripodPeriod = val;
+    Serial.printf("[OK] Walk period = %lu ms\n", val);
+    SerialBT.printf("OK:WALKSPEED=%lu\n", val);
     return;
   }
   if (cmd.startsWith("WALKSWING ")) {
@@ -798,7 +1050,11 @@ void printHelp() {
   Serial.println(F("  HEXAPOD COMMAND REFERENCE  (USB Serial + Bluetooth)"));
   Serial.println(F("----------------------------------------------------------"));
   Serial.println(F(" Motion Modes:"));
-  Serial.println(F("   WALK / GAIT / STEP  -> Tripod gait walk"));
+  Serial.println(F("   WALK / F            -> Ripple gait FORWARD (ultra-stable, 4-leg ground)"));
+  Serial.println(F("   B / BACK            -> Ripple gait BACKWARD"));
+  Serial.println(F("   L / LEFT            -> Ripple gait TURN LEFT"));
+  Serial.println(F("   R / RIGHT           -> Ripple gait TURN RIGHT"));
+  Serial.println(F("   TRIPOD              -> Tripod gait (3-leg swap, faster)"));
   Serial.println(F("   DANCE / PARTY       -> 16-sec choreographed dance"));
   Serial.println(F("   WAVE                -> Sequential leg wave"));
   Serial.println(F("   SWEEP / S           -> Synchronised sweep 45-135 deg"));
@@ -807,7 +1063,8 @@ void printHelp() {
   Serial.println(F(""));
   Serial.println(F(" Poses:"));
   Serial.println(F("   CENTER / C          -> All servos to 90 deg"));
-  Serial.println(F("   STAND               -> Standing stance (90/60/120)"));
+  Serial.println(F("   STAND / U           -> Standing stance (90/90/175)"));
+  Serial.println(F("   SIT / D             -> Sit pose (90/90/90)"));
   Serial.println(F(""));
   Serial.println(F(" Individual Joint Control:"));
   Serial.println(F("   L1 <deg> ... L6 <deg>   -> Set Coxa angle"));
@@ -864,12 +1121,16 @@ void printStatus() {
 
   Serial.println(F("-------------------------------------------------------"));
   const char* modeStr =
-    (mode == MODE_HOLD)  ? "HOLD (static)" :
-    (mode == MODE_WALK)  ? "WALK (tripod gait)" :
-    (mode == MODE_DANCE) ? "DANCE (16-sec cycle)" :
-    (mode == MODE_WAVE)  ? "WAVE (sequential)" : "SWEEP (45-135)";
-  Serial.printf(" Mode: %s\n", modeStr);
-  Serial.printf(" Walk: period=%lu ms  swing=%.0f deg  lift=%.0f deg\n",
-                walkPeriod, walkSwing, walkLift);
+    (mode == MODE_HOLD)   ? "HOLD (static)" :
+    (mode == MODE_RIPPLE) ? "RIPPLE (4-leg grounded)" :
+    (mode == MODE_TRIPOD) ? "TRIPOD (3-leg swap)" :
+    (mode == MODE_DANCE)  ? "DANCE (16-sec cycle)" :
+    (mode == MODE_WAVE)   ? "WAVE (sequential)" : "SWEEP (45-135)";
+  Serial.printf(" Mode: %s  Dir: %s\n", modeStr,
+                walkDir == 1 ? "FWD" : walkDir == -1 ? "BWD" :
+                walkDir == 2 ? "LEFT" : "RIGHT");
+  Serial.printf(" Walk: ripple=%lu ms  tripod=%lu ms  swing=%.0f deg  lift=%.0f deg\n",
+                ripplePeriod, tripodPeriod, walkSwing, walkLift);
+  Serial.printf(" Stand pose: L=90 M=90 D=175\n");
   Serial.println(F("=======================================================\n"));
 }

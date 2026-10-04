@@ -2,8 +2,8 @@
 
 > **Project Owner:** Dakshan  
 > **Start Date:** April 2026  
-> **Last Updated:** 2026-09-24 22:54 IST  
-> **Previous Updates:** 2026-09-24 22:04 IST | 2026-09-24 22:02 IST | 2026-09-24 21:56 IST | 2026-09-13 00:24 IST | 2026-09-12 23:33 IST | 2026-09-12 20:20 IST | 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
+> **Last Updated:** 2026-10-04 23:16 IST  
+> **Previous Updates:** 2026-10-04 23:04 IST | 2026-10-04 22:28 IST | 2026-10-03 17:04 IST | 2026-09-24 22:54 IST | 2026-09-24 22:04 IST | 2026-09-24 22:02 IST | 2026-09-24 21:56 IST | 2026-09-13 00:24 IST | 2026-09-12 23:33 IST | 2026-09-12 20:20 IST | 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
 > **Phase 2 Status:** Finished on 2026-09-04 — Single-Leg Subassembly Testing Verified (L=Ch0, M=Ch1, D=Ch2 fully coordinated & dancing)
 > **Current Status:** Phase 3 — Full 18-servo dual-PCA9685 controller (0x40 Right, 0x43 Left) with direction inversion (INV), trim calibration, gait choreography, and live SWAP command.
 
@@ -214,8 +214,8 @@ Bonka 3S LiPo (11.1V)
 | Joint | Anatomical Name | Motion Axis | Function | Default Pose |
 |-------|-----------------|-------------|----------|--------------|
 | **L** | Coxa (Hip) | Horizontal (Yaw) | Swings leg forward & backward for walking | 90° (Neutral) |
-| **M** | Femur (Thigh) | Vertical (Pitch) | Lifts leg off ground during swing phase | 60° (Stand) / 90° (Center) |
-| **D** | Tibia (Shin/Foot) | Vertical (Pitch) | Extends down to push or tucks during step | 120° (Stand) / 90° (Center) |
+| **M** | Femur (Thigh) | Vertical (Pitch) | Lifts leg off ground during swing phase | 90° (Stand & Center) |
+| **D** | Tibia (Shin/Foot) | Vertical (Pitch) | Extends down to push or tucks during step | 175° (Stand) / 90° (Center) |
 
 ### Dual PCA9685 I²C Daisy-Chain Bus
 
@@ -277,6 +277,10 @@ d:\hexa\
 ├── platformio.ini          ← PlatformIO config (ESP32 + Adafruit PCA9685 + BT)
 ├── src\
 │   └── main.cpp            ← Full 18-servo dual-PCA9685 controller firmware
+├── docs\
+│   └── reference\
+│       └── Hexapod_Arduino.ino  ← Emre Kalem original code (MIT, reference only, NOT compiled)
+├── sota.md                 ← SOTA stand & walk logic breakdown + porting plan
 ├── rule_book_dk.md         ← This file (full project reference)
 └── README.md               ← Quick readme
 ```
@@ -359,6 +363,9 @@ pio device monitor
 - [ ] Suspended gait testing → Phase 4
 - [ ] Ground walking + thermal monitoring → Phase 5
 - [ ] Dual-SMPS wiring / bundled power feeds to eliminate standing inrush stall
+- [ ] Measure real Coxa/Femur/Tibia lengths (SOTA assumes 38 / 86.25 / 160.5 mm)
+- [ ] Find per-joint direction signs (sL, sM, sD) per side with robot on a stand
+- [ ] Port SOTA Cartesian + IK tripod gait into `main.cpp` using delta mapping (see `sota.md` §7)
 
 ---
 
@@ -376,6 +383,9 @@ pio device monitor
 | 8 | 360° servos creep at 1500us | Use `T` command to find exact stop-point per servo | ⏳ Calibrating |
 | 9 | Single SMPS needs manual hand push to lift robot to stand | (1) Simultaneous 18-servo stall inrush (>30A) sags voltage; (2) Thin wire gauge drops voltage; (3) 5V delivers less torque than 6V. Solution: Split to two SMPS supplies (isolated +5V rails, common GND), bundle multiple wires per terminal, and add soft-start current ramping in firmware | ✅ Solution Documented |
 | 10 | Connecting second PCA9685 made one board disappear on I²C | 6-pin side header pin 2 is OE (Output Enable), not SCL! Daisy-chaining with a 4-pin sequential jumper shorted SCL to OE and left VCC unpowered. Solution: Skip OE and V+ pins; wire only GND (1), SCL (3), SDA (4), VCC (5) | ✅ Resolved |
+| 11 | STAND works at 90/90/175, but WALK tips over | All gait calculations used wrong stand base angles (M=60, D=120). Actual hardware confirmed M=90, D=175. Walk computed lift/tuck offsets from the wrong base so legs went to impossible positions, causing 3-leg tripod to tip instantly. Solution: (1) Updated all motion functions to use M=90, D=175 as base; (2) Added ultra-stable Ripple gait (only 2 diagonal legs lift at a time, 4 always grounded); (3) Added F/B/L/R single-char commands for App compatibility; (4) Reduced walkLift and walkSwing for stability | ✅ Fixed |
+| 12 | Angle-offset gait makes corner feet drag / change height | Emre's SOTA code moves feet in XYZ space and uses IK. In stance, corner legs (RF/RR/LF/LR) need M ±13° and D ±19° to keep the foot flat and moving in a straight line. Our gait only sweeps L, so corner feet arc and bob. Solution: port the SOTA IK gait with delta mapping onto our 90/90/175 stand (see `sota.md`). Watch out: D=175 leaves only 5° before 180° | ⏳ Planned |
+| 13 | Walk command didn't stand robot first & D range was clamped | (1) When WALK was commanded, the robot was flat/sitting and tried to walk without standing up first. (2) Tibia software clamp was [20, 160], preventing D from reaching 175° (stand) or 5° (tuck). (3) Standing up in 1 instant step stalled servos. Solution: Implemented user's verified stand-up sequence (tuck D to 5°, then smooth ramp 5°->175°). Expanded D minA/maxA to [0, 180]. Made startWalk() automatically trigger stand-up first if not standing, then smoothly ramp into walk. Lift legs by tucking D (35° off ground) with M held at 90° | ✅ Fixed |
 
 ---
 
@@ -481,6 +491,11 @@ All information provided by the project owner, timestamped for reference.
 | 2026-09-24 21:56 IST | Reviewed Remote Git Updates & Embedded Diagram | Reviewed user commit 1a3e0d3 adding technical 90° center pose diagram (docs/hexapod_90deg_center_pose.jpg) and communication protocols documentation. Embedded the 90° pose diagram into the Physical Kinematics section of rule_book_dk.md. |
 | 2026-09-24 22:02 IST | Computer SMPS 5V Power Supply Evaluation | Evaluated using ATX computer SMPS 5V rails for stationary hexapod testing. Confirmed 5V direct to PCA9685 V+ is excellent (15-30A headroom). Documented critical safety rules: (1) Never tie two +5V outputs together; (2) Common GND must tie both SMPS GNDs to ESP32 GND; (3) Green PS_ON to Black GND to activate; (4) Logic VCC stays on ESP32 3.3V. |
 | 2026-09-24 22:04 IST | Single SMPS Inrush & Standing Stall Diagnosis | User reported single SMPS struggles to lift robot from flat to stand pose without manual hand assist. Diagnosed: (1) 18-servo simultaneous stall inrush (25-40A) causing +5V rail sag; (2) Single-wire gauge bottleneck (need 3-4 bundled red/black wires); (3) 5V torque lower than 6V; (4) Instantaneous stand step firing all 18 motors at once. Confirmed splitting to TWO SMPS supplies directly fixes this, and outlined soft-start ramping. |
+| 2026-10-03 17:04 IST | Standing Confirmed Working / Walking Gait Issue Reported | User reported STAND pose is working well, but the walking gait (WALK) is not working. Robot tips over when lifting 3 legs in tripod gait. |
+| 2026-10-04 22:28 IST | Correct Stand Angles Confirmed: L=90 M=90 D=175 | User confirmed the actual working stand angles are L=90, M=90, D=175 — NOT the L=90, M=60, D=120 previously coded. All gait functions (walk, dance, wave) were computing lift/tuck offsets from wrong base angles (M=60, D=120), causing legs to go to impossible positions during walk and causing immediate tip-over. Fixed all motion functions to use M=90 base and D=175 base. Added ultra-stable Ripple gait (2 diagonal legs lift, 4 always grounded). Added F/B/L/R/U/D single-char commands for Android App. Reduced walkSwing to 18° and walkLift to 16° for stability. |
+| 2026-10-04 23:04 IST | SOTA Stand & Walk Logic Analysed | User shared Emre Kalem's original hexapod v1.0.0 code (Arduino Mega + NRF24, MIT). Analysed and saved to `sota.md`; saved the original code to `docs/reference/Hexapod_Arduino.ino`. **Stand:** foot home = FK(coxa 0°, femur 45°, tibia −90°) → 212.48 mm out from hip, z forced to −40 mm → IK gives servo 90 / 140.7 / 92.4 on every leg. **Walk:** tripod A = RF,RR,LM and B = RM,LR,LF, 0.5 phase apart; t += 0.015 per ~11 ms loop (~0.75 s cycle); stance slides foot ±30 mm in a straight line at constant z; swing is a half-sine 100 mm lift; turning rotates home ±7.5° around body centre; α = 0.4 low-pass on foot targets; coxa clamped 45–135. Our stand (90/90/175) uses a different servo convention, so port with delta mapping: our = ourStand + sign × (emreIK − emreStand). |
+| 2026-10-04 23:16 IST | D=5°->175° Stand-up Sequence & Auto-Stand Walk Fix | User explained: (1) When WALK is commanded, the robot cannot stand and transition to walk; (2) In their proven stand code, D first moves to 5° (tuck/fold under), then sweeps to 175° to lift the robot up; (3) After stand, walking failed because D limits were clamped at [20, 160], so 175° was never reached, and M lift lacked verified per-side direction. Fixed: D range expanded to [0, 180]. Added `beginStandup()` implementing the 5°->175° smoothstep ramp. Updated `startWalk()` so any walk command (`WALK`, `F`, `B`, `L`, `R`, `TRIPOD`) automatically performs the smooth stand-up first if not yet standing, then ramps into walking with a 1-cycle blend. Walking lift uses D-tuck (35° lift off ground) while M stays steady at 90° horizontal. Build verified clean. |
+| 2026-10-04 23:19 IST | Pushed to GitHub Repository | Committed and pushed changes to origin/main: correct 90/90/175 stand pose, D: 5°->175° soft stand-up sequence, auto-stand transitions before walking gaits, SOTA logic documentation (`sota.md`), reference code (`docs/reference/Hexapod_Arduino.ino`), and updated rule book. Working tree clean. |
 
 ---
 
@@ -536,6 +551,7 @@ These decisions are FINAL. Do NOT change them or suggest alternatives unless the
 - **Config:** `d:\hexa\platformio.ini`
 - **Library:** Adafruit PWM Servo Driver Library (via PlatformIO lib_deps).
 - **All servo control** goes through PCA9685 `writeMicroseconds()` — never use direct GPIO PWM.
+- **Gait reference:** `d:\hexa\sota.md` is the SOTA (Emre Kalem) stand/walk logic. Gait work should follow its Cartesian + IK approach. Never copy Emre's raw servo angles; always use the delta mapping onto our confirmed stand (L=90, M=90, D=175).
 - **I²C bus** initialized with `Wire.begin(21, 22)` at 400kHz.
 - Always include an **I²C scanner** in setup for diagnostics.
 - Always include a **Serial command interface** for interactive testing.
@@ -570,6 +586,7 @@ When the user tells you something new about the project (new parts, test results
 ## Reference Links
 
 - **Inspiration:** Emre Kalem's 3D Printed RC Hexapod Spider Robot (YouTube)
+- **Original code (local):** `docs/reference/Hexapod_Arduino.ino` — logic explained in `sota.md`
 - **PCA9685 Library:** [Adafruit PWM Servo Driver Library](https://github.com/adafruit/Adafruit-PWM-Servo-Driver-Library)
 - **ESP32 Pinout:** SDA=GPIO21, SCL=GPIO22 (default I²C)
 - **PlatformIO Docs:** [platformio.org](https://platformio.org/)
