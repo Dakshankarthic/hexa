@@ -2,8 +2,8 @@
 
 > **Project Owner:** Dakshan  
 > **Start Date:** April 2026  
-> **Last Updated:** 2026-10-04 23:16 IST  
-> **Previous Updates:** 2026-10-04 23:04 IST | 2026-10-04 22:28 IST | 2026-10-03 17:04 IST | 2026-09-24 22:54 IST | 2026-09-24 22:04 IST | 2026-09-24 22:02 IST | 2026-09-24 21:56 IST | 2026-09-13 00:24 IST | 2026-09-12 23:33 IST | 2026-09-12 20:20 IST | 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
+> **Last Updated:** 2026-10-04 23:33 IST\
+> **Previous Updates:** 2026-10-04 23:25 IST | 2026-10-04 23:16 IST | 2026-10-04 23:04 IST | 2026-10-04 22:28 IST | 2026-10-03 17:04 IST | 2026-09-24 22:54 IST | 2026-09-24 22:04 IST | 2026-09-24 22:02 IST | 2026-09-24 21:56 IST | 2026-09-13 00:24 IST | 2026-09-12 23:33 IST | 2026-09-12 20:20 IST | 2026-09-12 20:09 IST | 2026-09-12 20:08 IST | 2026-09-12 19:42 IST | 2026-09-12 19:36 IST | 2026-09-12 19:33 IST | 2026-09-12 19:26 IST | 2026-09-12 19:25 IST | 2026-09-12 19:22 IST | 2026-09-11 13:34 IST | 2026-09-11 13:21 IST | 2026-09-11 13:18 IST | 2026-09-11 13:13 IST | 2026-09-11 13:04 IST | 2026-09-11 12:58 IST | 2026-09-09 19:38 IST | 2026-09-09 19:30 IST | 2026-09-08 21:15 IST | 2026-09-08 20:44 IST | 2026-09-04 16:14 IST | 2026-09-04 16:10 IST | 2026-09-04 15:55 IST | 2026-09-04 15:49 IST | 2026-09-04 13:46 IST | 2026-09-04 13:27 IST | 2026-09-04 13:17 IST | 2026-09-04 13:11 IST | 2026-08-22 20:19 IST | 2026-08-22 20:17 IST | 2026-08-22 20:14 IST | 2026-08-22 19:59 IST | 2026-08-22 19:41 IST | 2026-05-28 18:46 IST | 2026-05-01 00:44 IST | 2026-05-01 00:30 IST | 2026-04-30 23:55 IST | 2026-04-30 20:00 IST
 > **Phase 2 Status:** Finished on 2026-09-04 — Single-Leg Subassembly Testing Verified (L=Ch0, M=Ch1, D=Ch2 fully coordinated & dancing)
 > **Current Status:** Phase 3 — Full 18-servo dual-PCA9685 controller (0x40 Right, 0x43 Left) with direction inversion (INV), trim calibration, gait choreography, and live SWAP command.
 
@@ -15,9 +15,11 @@
 - [Design Evolution & Decisions](#design-evolution--decisions)
 - [Hardware Bill of Materials](#hardware-bill-of-materials)
 - [Architecture & Wiring](#architecture--wiring)
+- [ASTRA Perspective: Stand Angles](#astra-perspective-stand-angles)
 - [Power System](#power-system)
 - [Software & Firmware](#software--firmware)
 - [Current Progress](#current-progress)
+- [Main To-Do List](#main-to-do-list)
 - [Known Issues & Solutions](#known-issues--solutions)
 - [Build Phases](#build-phases)
 - [Information Log (Chronological)](#information-log-chronological)
@@ -217,6 +219,26 @@ Bonka 3S LiPo (11.1V)
 | **M** | Femur (Thigh) | Vertical (Pitch) | Lifts leg off ground during swing phase | 90° (Stand & Center) |
 | **D** | Tibia (Shin/Foot) | Vertical (Pitch) | Extends down to push or tucks during step | 175° (Stand) / 90° (Center) |
 
+### ASTRA Perspective: Stand Angles
+
+**Date:** 2026-10-04 23:25 IST
+
+**Author:** Codex, using the perspective label "ASTRA" requested by Dakshan.
+
+**Evidence:** Recorded user observations and the current `src/main.cpp`; no new hardware measurements or movement tests were performed for this assessment.
+
+**My recommendation is to retain L=90, M=90, D=175 as the working standing baseline for this assembly.** The owner reported that it stands at these settings, and the firmware's `STAND_L`, `STAND_M`, and `STAND_D` match them. That supports using this pose as a reference; it does not establish an optimum for current consumption, joint loading, or walking. The earlier 90/60/120 pose is historical. The 90/90/90 center pose was reported unsuitable for standing on this assembly.
+
+**Servo commands are not measured leg geometry.** Horn indexing, trim, inversion, and actual link dimensions determine where each foot goes. A D command of 175 degrees does not by itself mean the physical knee is nearly straight or mechanically locked. With zero trim, it leaves only 5 degrees before the current 180-degree software clamp; positive trim reduces that margin. Physical travel limits still need to be established per joint. This matters when a future gait asks D to increase beyond the standing value.
+
+**Standing up and holding a stand are separate behaviors.** In the current firmware, `STAND` / `U` runs the recorded tuck-and-rise sequence: D moves toward 5 over 800 ms, then rises to 175 over 2000 ms, with L and M commanded to 90. `SET 90 90 175` commands the final pose directly and does not reproduce this transition. A smooth ramp changes the motion profile; it does not prove that the power supply or servos can support the load.
+
+**The earlier 165/170-degree suggestions are untested comparison points.** There is no recorded evidence that 170 is better than 175. Any comparison should begin from the established stand, change D in small increments with the body supported against a fall, and keep the payload and supply conditions consistent. Record body height and level, contact at all six feet, supply voltage under load, holding current, temperature trend, and any sag or binding. Persistent buzzing alone does not identify the cause. Keep 175 as the baseline until a comparison demonstrates a useful improvement.
+
+**Walking needs its own validation.** The current default gait uses `walkLift=0` and tucks D by up to 35 degrees, giving nominal D targets from 175 to 140 during swing. Keep M direction verification on the checklist before introducing femur lift. Scheduling four stance legs does not prove four feet are actually supporting the robot, and the source comment that the robot "CANNOT tip over" is too strong. For slow walking on level ground, assess the center of mass relative to the actual support polygon, foot grip, and available joint torque. Support geometry alone can admit poses that exceed actuator limits; see [Orsolino et al., Feasible Region: an Actuation-Aware Extension of the Support Region](https://arxiv.org/abs/1903.07999).
+
+**My next priority would be repeatable standing, then verified foot lift and placement, then walking.** Measure the real leg geometry and calibrate joint directions and offsets before porting the Cartesian/IK gait. Matching another robot's angles at one home pose does not validate its entire foot path on this assembly. Treat existing "fixed" log entries as records of software changes unless a subsequent hardware result confirms the behavior. This assessment changes documentation only and does not record a new successful walking test.
+
 ### Dual PCA9685 I²C Daisy-Chain Bus
 
 ```
@@ -351,7 +373,15 @@ pio device monitor
 - [x] All 18 servos mounted and wired to dual PCA9685 boards
 - [x] ZX-052 buck converter providing 6V to servo V+
 
-### What's Next 🔜
+### Main To-Do List
+
+**ASTRA review priorities (2026-10-04 23:33 IST):** These are open code-review findings. The fixes and hardware validation are still pending.
+
+- [ ] **Issue 14 - Bluetooth command parsing:** Prevent full text commands from being executed as single-letter movement commands. In `handleBTInput()`, `RELAX` currently triggers `R` (turn right) before the rest of the word arrives. Define unambiguous command framing while preserving the Android app's single-character controls. Verify full commands, fragmented input, and button commands before marking complete.
+- [ ] **Issue 15 - Standing-state tracking:** Update or invalidate `isStanding` when manual commands change the pose. Reproduce completed `STAND` -> `SET 90 90 90` -> `WALK`: the stale flag currently skips the stand-up sequence. Audit `SET`, `LEG`, individual joints, `ALL`, and other pose-changing actions; verify walk entry from each resulting state.
+- [ ] **Issue 16 - ALL calibration and limits:** Remove the raw PWM overwrite after `ALL` calls `setLeg()`, so mapped servos retain their per-joint trim, inversion, and angle limits. Verify with nonzero trim, an inverted joint, and requests outside configured limits that the final hardware writes match `writeJoint()`.
+
+**Existing build and calibration tasks:**
 
 - [ ] Calibrate each 360° servo's exact stop-point (use `T` command)
 - [x] Receive 180° MG996R servos → replace 360° servos
@@ -365,6 +395,7 @@ pio device monitor
 - [ ] Dual-SMPS wiring / bundled power feeds to eliminate standing inrush stall
 - [ ] Measure real Coxa/Femur/Tibia lengths (SOTA assumes 38 / 86.25 / 160.5 mm)
 - [ ] Find per-joint direction signs (sL, sM, sD) per side with robot on a stand
+- [ ] Record a measured standing baseline at 90/90/175; compare nearby D settings only after repeatable standing, logging contact, sag, voltage, current, and temperature
 - [ ] Port SOTA Cartesian + IK tripod gait into `main.cpp` using delta mapping (see `sota.md` §7)
 
 ---
@@ -386,6 +417,9 @@ pio device monitor
 | 11 | STAND works at 90/90/175, but WALK tips over | All gait calculations used wrong stand base angles (M=60, D=120). Actual hardware confirmed M=90, D=175. Walk computed lift/tuck offsets from the wrong base so legs went to impossible positions, causing 3-leg tripod to tip instantly. Solution: (1) Updated all motion functions to use M=90, D=175 as base; (2) Added ultra-stable Ripple gait (only 2 diagonal legs lift at a time, 4 always grounded); (3) Added F/B/L/R single-char commands for App compatibility; (4) Reduced walkLift and walkSwing for stability | ✅ Fixed |
 | 12 | Angle-offset gait makes corner feet drag / change height | Emre's SOTA code moves feet in XYZ space and uses IK. In stance, corner legs (RF/RR/LF/LR) need M ±13° and D ±19° to keep the foot flat and moving in a straight line. Our gait only sweeps L, so corner feet arc and bob. Solution: port the SOTA IK gait with delta mapping onto our 90/90/175 stand (see `sota.md`). Watch out: D=175 leaves only 5° before 180° | ⏳ Planned |
 | 13 | Walk command didn't stand robot first & D range was clamped | (1) When WALK was commanded, the robot was flat/sitting and tried to walk without standing up first. (2) Tibia software clamp was [20, 160], preventing D from reaching 175° (stand) or 5° (tuck). (3) Standing up in 1 instant step stalled servos. Solution: Implemented user's verified stand-up sequence (tuck D to 5°, then smooth ramp 5°->175°). Expanded D minA/maxA to [0, 180]. Made startWalk() automatically trigger stand-up first if not standing, then smoothly ramp into walk. Lift legs by tucking D (35° off ground) with M held at 90° | ✅ Fixed |
+| 14 | Bluetooth text commands can trigger unintended movement | `handleBTInput()` dispatches recognized first letters immediately; `RELAX` becomes `R` (turn right), leaving an invalid remainder. Define unambiguous framing for text and app button commands; verify fragmented input as well as complete commands. Source: `src/main.cpp`, `handleBTInput()`. | Open - reviewed by ASTRA; fix and validation pending |
+| 15 | Manual pose changes leave stale standing status | After completed `STAND`, `SET 90 90 90` leaves `isStanding=true`; the next `WALK` skips standing up. Update or invalidate the state for manual and other pose-changing actions, then verify the transition into walking. Source: `processCmd()` and `startWalk()`. | Open - reviewed by ASTRA; fix and validation pending |
+| 16 | ALL overwrites per-joint calibration and angle limits | `ALL` first calls `setLeg()`, then broadcasts raw PWM to channels 0-15, replacing the corrected outputs. Keep mapped servo writes on the calibrated `writeJoint()` path and verify trim, inversion, and joint clamping remain effective. Source: `processCmd()`, ALL handler. | Open - reviewed by ASTRA; fix and validation pending |
 
 ---
 
@@ -496,6 +530,8 @@ All information provided by the project owner, timestamped for reference.
 | 2026-10-04 23:04 IST | SOTA Stand & Walk Logic Analysed | User shared Emre Kalem's original hexapod v1.0.0 code (Arduino Mega + NRF24, MIT). Analysed and saved to `sota.md`; saved the original code to `docs/reference/Hexapod_Arduino.ino`. **Stand:** foot home = FK(coxa 0°, femur 45°, tibia −90°) → 212.48 mm out from hip, z forced to −40 mm → IK gives servo 90 / 140.7 / 92.4 on every leg. **Walk:** tripod A = RF,RR,LM and B = RM,LR,LF, 0.5 phase apart; t += 0.015 per ~11 ms loop (~0.75 s cycle); stance slides foot ±30 mm in a straight line at constant z; swing is a half-sine 100 mm lift; turning rotates home ±7.5° around body centre; α = 0.4 low-pass on foot targets; coxa clamped 45–135. Our stand (90/90/175) uses a different servo convention, so port with delta mapping: our = ourStand + sign × (emreIK − emreStand). |
 | 2026-10-04 23:16 IST | D=5°->175° Stand-up Sequence & Auto-Stand Walk Fix | User explained: (1) When WALK is commanded, the robot cannot stand and transition to walk; (2) In their proven stand code, D first moves to 5° (tuck/fold under), then sweeps to 175° to lift the robot up; (3) After stand, walking failed because D limits were clamped at [20, 160], so 175° was never reached, and M lift lacked verified per-side direction. Fixed: D range expanded to [0, 180]. Added `beginStandup()` implementing the 5°->175° smoothstep ramp. Updated `startWalk()` so any walk command (`WALK`, `F`, `B`, `L`, `R`, `TRIPOD`) automatically performs the smooth stand-up first if not yet standing, then ramps into walking with a 1-cycle blend. Walking lift uses D-tuck (35° lift off ground) while M stays steady at 90° horizontal. Build verified clean. |
 | 2026-10-04 23:19 IST | Pushed to GitHub Repository | Committed and pushed changes to origin/main: correct 90/90/175 stand pose, D: 5°->175° soft stand-up sequence, auto-stand transitions before walking gaits, SOTA logic documentation (`sota.md`), reference code (`docs/reference/Hexapod_Arduino.ino`), and updated rule book. Working tree clean. |
+| 2026-10-04 23:25 IST | ASTRA Perspective on Stand Angles | User requested an assessment of the standing-angle advice in the rule book under the label ASTRA. Retain 90/90/175 as the owner-reported working baseline; optimal stance remains unmeasured. Clarified servo commands versus physical geometry, 5-degree nominal D command margin, STAND sequence versus direct SET, and that 165/170 are untested comparisons. Added measured stance validation to the checklist and distinguished software changes from successful hardware walking tests. Documentation only; no firmware changes or robot commands. |
+| 2026-10-04 23:33 IST | ASTRA Review Added to Main To-Do List | User requested the perspective label be corrected to ASTRA and all three review findings be added to the main to-do list and rule book. Renamed the existing What's Next checklist to Main To-Do List, placed Bluetooth parsing, stale standing-state tracking, and ALL calibration/limit bypass at the top, and added Known Issues 14-16 with reproduction details and proposed fixes. Updated perspective attribution and links. All three remain open; documentation updated only, with no firmware fixes or hardware tests claimed. |
 
 ---
 
